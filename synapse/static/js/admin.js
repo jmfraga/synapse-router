@@ -7,9 +7,13 @@ let cachedProviders = [];       // from /api/providers
 
 // --- Generic API helper ---
 async function api(path, method = 'GET', body = null) {
-    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    const opts = { method, headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' };
     if (body) opts.body = JSON.stringify(body);
     const res = await fetch(API + path, opts);
+    if (res.status === 401) {
+        location.reload(); // Force browser to re-prompt for credentials
+        return {};
+    }
     return res.json();
 }
 
