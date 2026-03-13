@@ -11,7 +11,6 @@
         <h1>⚡ Synapse Router</h1>
         <nav>
             <a href="#providers">Providers</a>
-            <a href="#provider-config">Config APIs</a>
             <a href="#routes">Rutas</a>
             <a href="#smart-routes">Smart Routes</a>
             <a href="#keys">API Keys</a>
@@ -43,47 +42,44 @@
         <!-- Providers -->
         <section id="providers">
             <h2>Providers</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Provider</th>
-                        <th>Prioridad</th>
-                        <th>Tipo</th>
-                        <th>Latencia</th>
-                        <th>Estado</th>
-                        <th>Acciones</th>
-                    </tr>
-                </thead>
-                <tbody>
-                {% for p in providers %}
-                    <tr data-id="{{ p.id }}">
-                        <td><strong>{{ p.display_name }}</strong></td>
-                        <td>{{ p.priority }}</td>
-                        <td>{{ "Local" if p.is_local else "Cloud" }}</td>
-                        <td>{{ p.avg_latency_ms }}ms</td>
-                        <td>
-                            <span class="badge {{ 'active' if p.is_enabled else 'inactive' }}">
-                                {{ "Activo" if p.is_enabled else "Inactivo" }}
-                            </span>
-                        </td>
-                        <td>
-                            <button onclick="toggleProvider({{ p.id }}, {{ 'false' if p.is_enabled else 'true' }})">
-                                {{ "Desactivar" if p.is_enabled else "Activar" }}
-                            </button>
-                        </td>
-                    </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-        </section>
-
-        <!-- Provider Configuration (External APIs) -->
-        <section id="provider-config">
-            <h2>Configuración de Providers Externos</h2>
             <p class="section-desc">
-                Configura las API keys de tus proveedores externos y selecciona qué modelos activar.
-                Los modelos activados estarán disponibles en rutas, smart routes y API keys.
+                Configura tus proveedores de IA, API keys y selecciona qué modelos activar.
             </p>
+            <button onclick="showNewProviderForm()">+ Nuevo Proveedor</button>
+            <div id="new-provider-form" style="display:none; margin: 1rem 0;" class="smart-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="np-name">Nombre interno</label>
+                        <input id="np-name" placeholder="e.g. mistral" />
+                        <span class="hint">Identificador único, sin espacios</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="np-display">Nombre para mostrar</label>
+                        <input id="np-display" placeholder="e.g. Mistral AI" />
+                    </div>
+                    <div class="form-group">
+                        <label for="np-base-url">Base URL (opcional)</label>
+                        <input id="np-base-url" placeholder="e.g. https://api.mistral.ai/v1" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="np-priority">Prioridad</label>
+                        <input id="np-priority" type="number" value="10" min="1" max="100" style="width:80px" />
+                    </div>
+                    <div class="form-group">
+                        <label>Tipo</label>
+                        <select id="np-local">
+                            <option value="false">Cloud (requiere API key)</option>
+                            <option value="true">Local</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>&nbsp;</label>
+                        <button onclick="createProvider()">Crear Proveedor</button>
+                    </div>
+                </div>
+            </div>
             <div id="provider-config-cards">
                 <!-- Populated by JS -->
             </div>

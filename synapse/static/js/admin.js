@@ -261,6 +261,41 @@ async function toggleProvider(id, enable) {
     location.reload();
 }
 
+// --- New Provider ---
+function showNewProviderForm() {
+    const form = document.getElementById('new-provider-form');
+    form.style.display = form.style.display === 'none' ? 'block' : 'none';
+}
+
+async function createProvider() {
+    const name = document.getElementById('np-name').value.trim().toLowerCase().replace(/\s+/g, '-');
+    const displayName = document.getElementById('np-display').value.trim();
+    const baseUrl = document.getElementById('np-base-url').value.trim();
+    const priority = parseInt(document.getElementById('np-priority').value) || 10;
+    const isLocal = document.getElementById('np-local').value === 'true';
+
+    if (!name || !displayName) {
+        alert('Nombre interno y nombre para mostrar son requeridos');
+        return;
+    }
+
+    await api('/admin/api/providers', 'POST', {
+        name, display_name: displayName, base_url: baseUrl,
+        priority, is_local: isLocal,
+    });
+    location.reload();
+}
+
+async function deleteProvider(id, name) {
+    if (!confirm(`¿Eliminar el proveedor "${name}"? Esto no se puede deshacer.`)) return;
+    await api(`/admin/api/providers/${id}`, 'DELETE');
+    location.reload();
+}
+
+async function updateProviderPriority(id, priority) {
+    await api(`/admin/api/providers/${id}`, 'PUT', { priority: parseInt(priority) });
+}
+
 // --- Routes ---
 function showRouteForm() {
     const form = document.getElementById('route-form');
@@ -839,18 +874,17 @@ function renderProviderConfigCards() {
     const container = document.getElementById('provider-config-cards');
     if (!container) return;
 
-    // Only show external (non-local) providers
-    const external = cachedProviders.filter(p => !p.is_local);
-    if (external.length === 0) {
-        container.innerHTML = '<p style="color:var(--text-dim)">No hay providers externos configurados.</p>';
+    if (cachedProviders.length === 0) {
+        container.innerHTML = '<p style="color:var(--text-dim)">No hay providers configurados.</p>';
         return;
     }
 
     container.innerHTML = '';
-    for (const p of external) {
+    for (const p of cachedProviders) {
         const hasKey = p.has_key;
+        const isLocal = p.is_local;
         const card = document.createElement('div');
-        card.className = `provider-card ${hasKey ? 'has-key' : 'no-key'}`;
+        card.className = `provider-card ${isLocal ? 'has-key' : (hasKey ? 'has-key' : 'no-key')}`;
         card.id = `pc-${p.id}`;
 
         const keySourceLabel = p.key_source === 'db' ? '(guardada en DB)'
@@ -878,15 +912,33 @@ function renderProviderConfigCards() {
         const allModels = providerModels?.all_models || providerModels?.models || [];
         const enabledModels = p.enabled_models || [];
 
+        const typeLabel = isLocal ? 'Local' : 'Cloud';
+        const enabledBadge = p.is_enabled
+            ? '<span class="badge active">Activo</span>'
+            : '<span class="badge inactive">Inactivo</span>';
+
         card.innerHTML = `
             <div class="pc-header" onclick="this.parentElement.classList.toggle('open')">
                 <h3>${p.display_name}</h3>
-                <span class="pc-key-status ${keyStatusClass}">${keyStatusText}</span>
-                ${keyPreview ? `<code style="font-size:0.8rem;color:var(--text-dim)">${keyPreview}</code>` : ''}
+                <span style="font-size:0.75rem;color:var(--text-dim)">${typeLabel} · P${p.priority}</span>
+                ${enabledBadge}
+                ${!isLocal ? `<span class="pc-key-status ${keyStatusClass}">${keyStatusText}</span>` : ''}
+                ${keyPreview && !isLocal ? `<code style="font-size:0.8rem;color:var(--text-dim)">${keyPreview}</code>` : ''}
                 ${expiryBadge}
                 <span class="pc-chevron">&#9660;</span>
             </div>
             <div class="pc-body">
+                <div style="display:flex;gap:0.5rem;margin-bottom:0.8rem;flex-wrap:wrap;align-items:center">
+                    <button class="btn-small ${p.is_enabled ? 'btn-danger' : ''}"
+                            onclick="toggleProvider(${p.id}, ${!p.is_enabled})">
+                        ${p.is_enabled ? 'Desactivar' : 'Activar'}
+                    </button>
+                    <button class="btn-small btn-danger" onclick="deleteProvider(${p.id}, '${p.display_name}')">Eliminar</button>
+                    <label style="font-size:0.8rem;margin:0">Prioridad:</label>
+                    <input type="number" value="${p.priority}" min="1" max="100" style="width:60px;font-size:0.8rem"
+                           onchange="updateProviderPriority(${p.id}, this.value)" />
+                </div>
+                ${!isLocal ? `
                 <div class="pc-key-row">
                     <input type="password" id="pc-key-${p.id}" placeholder="API Key del proveedor"
                            value="" autocomplete="off" />
@@ -896,12 +948,12 @@ function renderProviderConfigCards() {
                                style="width:140px;font-size:0.8rem" />
                     </div>
                     <button onclick="saveProviderKey(${p.id})">Guardar Key</button>
-                    ${hasKey ? `<button class="btn-danger btn-small" onclick="clearProviderKey(${p.id})">Borrar</button>` : ''}
+                    ${hasKey ? `<button class="btn-danger btn-small" onclick="clearProviderKey(${p.id})">Borrar Key</button>` : ''}
                     <button class="btn-secondary btn-small pc-discover-btn" onclick="discoverModels(${p.id})">
                         Descubrir modelos
                     </button>
                     <span id="pc-msg-${p.id}" class="pc-msg"></span>
-                </div>
+                </div>` : `<span id="pc-msg-${p.id}" class="pc-msg"></span>`}
                 <div class="pc-test-section" style="margin-top:0.8rem;padding-top:0.8rem;border-top:1px solid var(--border)">
                     <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
                         <label style="font-size:0.85rem;font-weight:500;margin:0">Probar conexión:</label>

@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     secret_key: str = "change-me-to-a-random-string"
     database_url: str = "sqlite+aiosqlite:///./synapse.db"
 
+    # Admin auth
+    admin_user: str = "admin"
+    admin_password: str = "changeme"
+
     # Providers
     ollama_base_url: str = "http://localhost:11434"
     anthropic_api_key: str = ""

@@ -7,9 +7,11 @@ import logging
 import os
 from typing import Optional
 
+import secrets
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import select, func, desc
@@ -21,9 +23,38 @@ from synapse.models import Provider, ApiKey, UsageLog, Route, SmartRoute
 from synapse.services.auth import hash_key
 
 logger = logging.getLogger("synapse.admin")
-
-router = APIRouter(prefix="/admin")
 templates = Jinja2Templates(directory="synapse/templates")
+
+
+# --- Basic Auth ---
+
+def _check_basic_auth(request: Request) -> bool:
+    """Validate Basic Auth credentials from the request."""
+    settings = get_settings()
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Basic "):
+        return False
+    import base64
+    try:
+        decoded = base64.b64decode(auth[6:]).decode("utf-8")
+        user, password = decoded.split(":", 1)
+        return secrets.compare_digest(user, settings.admin_user) and \
+               secrets.compare_digest(password, settings.admin_password)
+    except Exception:
+        return False
+
+
+async def require_admin(request: Request):
+    """Dependency that enforces Basic Auth on admin endpoints."""
+    if not _check_basic_auth(request):
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": 'Basic realm="Synapse Admin"'},
+        )
+
+
+router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
 
 
 # --- Admin UI ---
@@ -71,6 +102,14 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
 
 # --- Provider CRUD ---
 
+class ProviderCreate(BaseModel):
+    name: str
+    display_name: str
+    base_url: str = ""
+    is_local: bool = False
+    priority: int = 10
+
+
 class ProviderUpdate(BaseModel):
     display_name: Optional[str] = None
     base_url: Optional[str] = None
@@ -78,6 +117,36 @@ class ProviderUpdate(BaseModel):
     is_enabled: Optional[bool] = None
     priority: Optional[int] = None
     max_concurrent: Optional[int] = None
+
+
+@router.post("/api/providers")
+async def create_provider(data: ProviderCreate, db: AsyncSession = Depends(get_db)):
+    # Check uniqueness
+    existing = await db.execute(select(Provider).where(Provider.name == data.name))
+    if existing.scalar_one_or_none():
+        raise HTTPException(400, f"Provider '{data.name}' already exists")
+
+    provider = Provider(
+        name=data.name,
+        display_name=data.display_name,
+        base_url=data.base_url,
+        is_local=data.is_local,
+        priority=data.priority,
+        is_enabled=True,
+    )
+    db.add(provider)
+    await db.commit()
+    return {"status": "ok", "id": provider.id, "name": provider.name}
+
+
+@router.delete("/api/providers/{provider_id}")
+async def delete_provider(provider_id: int, db: AsyncSession = Depends(get_db)):
+    provider = await db.get(Provider, provider_id)
+    if not provider:
+        raise HTTPException(404, "Provider not found")
+    await db.delete(provider)
+    await db.commit()
+    return {"status": "deleted"}
 
 
 @router.get("/api/providers")
