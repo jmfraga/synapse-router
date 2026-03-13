@@ -216,6 +216,12 @@ async function initDropdowns() {
 
     // Populate chain-model selects in route builder
     populateChainModelSelects();
+
+    // Render provider configuration cards
+    renderProviderConfigCards();
+
+    // Render key expiry alerts
+    renderKeyExpiryAlerts();
 }
 
 function populateChainModelSelects() {
@@ -799,6 +805,362 @@ async function deleteSmartRoute(id) {
     if (!confirm('¿Eliminar este smart route?')) return;
     await api(`/admin/api/smart-routes/${id}`, 'DELETE');
     location.reload();
+}
+
+// --- Key Expiry Alerts ---
+function renderKeyExpiryAlerts() {
+    const container = document.getElementById('key-alerts');
+    if (!container) return;
+
+    const alerts = [];
+    for (const p of cachedProviders) {
+        if (p.key_expired) {
+            alerts.push(`<div class="key-expiry-alert expired">
+                <strong>${p.display_name}</strong> — API key EXPIRADA.
+                <a href="#provider-config">Renovar ahora</a>
+            </div>`);
+        } else if (p.key_expires_soon) {
+            alerts.push(`<div class="key-expiry-alert warning">
+                <strong>${p.display_name}</strong> — API key expira en <strong>${p.key_days_left} días</strong>
+                (${p.api_key_expires_at?.split('T')[0]}).
+                <a href="#provider-config">Configurar</a>
+            </div>`);
+        }
+    }
+
+    if (alerts.length > 0) {
+        container.innerHTML = alerts.join('');
+        container.style.display = 'block';
+    }
+}
+
+// --- Provider Configuration ---
+function renderProviderConfigCards() {
+    const container = document.getElementById('provider-config-cards');
+    if (!container) return;
+
+    // Only show external (non-local) providers
+    const external = cachedProviders.filter(p => !p.is_local);
+    if (external.length === 0) {
+        container.innerHTML = '<p style="color:var(--text-dim)">No hay providers externos configurados.</p>';
+        return;
+    }
+
+    container.innerHTML = '';
+    for (const p of external) {
+        const hasKey = p.has_key;
+        const card = document.createElement('div');
+        card.className = `provider-card ${hasKey ? 'has-key' : 'no-key'}`;
+        card.id = `pc-${p.id}`;
+
+        const keySourceLabel = p.key_source === 'db' ? '(guardada en DB)'
+            : p.key_source === 'env' ? '(variable de entorno)'
+            : '';
+
+        const keyStatusClass = hasKey ? 'configured' : 'not-configured';
+        const keyStatusText = hasKey ? `Configurada ${keySourceLabel}` : 'Sin configurar';
+        const keyPreview = p.key_preview || '';
+
+        // Expiry info
+        const expiresAt = p.api_key_expires_at ? p.api_key_expires_at.split('T')[0] : '';
+        const daysLeft = p.key_days_left;
+        let expiryBadge = '';
+        if (p.key_expired) {
+            expiryBadge = '<span class="pc-key-status" style="background:rgba(225,112,85,0.2);color:var(--danger)">EXPIRADA</span>';
+        } else if (p.key_expires_soon) {
+            expiryBadge = `<span class="pc-key-status" style="background:rgba(253,203,110,0.2);color:var(--warning)">${daysLeft} días restantes</span>`;
+        } else if (daysLeft !== null) {
+            expiryBadge = `<span style="font-size:0.8rem;color:var(--text-dim)">Expira en ${daysLeft} días</span>`;
+        }
+
+        // Find provider's model data from cachedByProvider
+        const providerModels = cachedByProvider.find(bp => bp.provider === p.name);
+        const allModels = providerModels?.all_models || providerModels?.models || [];
+        const enabledModels = p.enabled_models || [];
+
+        card.innerHTML = `
+            <div class="pc-header" onclick="this.parentElement.classList.toggle('open')">
+                <h3>${p.display_name}</h3>
+                <span class="pc-key-status ${keyStatusClass}">${keyStatusText}</span>
+                ${keyPreview ? `<code style="font-size:0.8rem;color:var(--text-dim)">${keyPreview}</code>` : ''}
+                ${expiryBadge}
+                <span class="pc-chevron">&#9660;</span>
+            </div>
+            <div class="pc-body">
+                <div class="pc-key-row">
+                    <input type="password" id="pc-key-${p.id}" placeholder="API Key del proveedor"
+                           value="" autocomplete="off" />
+                    <div style="display:flex;align-items:center;gap:0.3rem">
+                        <label style="font-size:0.8rem;white-space:nowrap;margin:0">Expira:</label>
+                        <input type="date" id="pc-expiry-${p.id}" value="${expiresAt}"
+                               style="width:140px;font-size:0.8rem" />
+                    </div>
+                    <button onclick="saveProviderKey(${p.id})">Guardar Key</button>
+                    ${hasKey ? `<button class="btn-danger btn-small" onclick="clearProviderKey(${p.id})">Borrar</button>` : ''}
+                    <button class="btn-secondary btn-small pc-discover-btn" onclick="discoverModels(${p.id})">
+                        Descubrir modelos
+                    </button>
+                    <span id="pc-msg-${p.id}" class="pc-msg"></span>
+                </div>
+                <div class="pc-test-section" style="margin-top:0.8rem;padding-top:0.8rem;border-top:1px solid var(--border)">
+                    <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+                        <label style="font-size:0.85rem;font-weight:500;margin:0">Probar conexión:</label>
+                        <select id="pc-test-model-${p.id}" style="min-width:200px">
+                            <option value="">-- Modelo --</option>
+                            ${allModels.slice(0, 50).map(m => `<option value="${m}">${m}</option>`).join('')}
+                        </select>
+                        <button class="btn-small" onclick="testProvider(${p.id})" ${!hasKey && !p.is_local ? 'disabled' : ''}>
+                            Probar
+                        </button>
+                        <span id="pc-test-msg-${p.id}" class="pc-msg"></span>
+                    </div>
+                    <pre id="pc-test-result-${p.id}" style="display:none;margin-top:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.6rem;font-size:0.8rem;max-height:150px;overflow-y:auto;white-space:pre-wrap"></pre>
+                </div>
+                <div class="pc-models-section" id="pc-models-${p.id}">
+                    <h4>
+                        Modelos activos
+                        ${allModels.length > 0 ? `<span class="pc-select-all" onclick="toggleAllModels(${p.id})">seleccionar/deseleccionar todos</span>` : ''}
+                    </h4>
+                    <div class="pc-model-grid" id="pc-grid-${p.id}">
+                        ${allModels.length > 0
+                            ? allModels.map(m => {
+                                const checked = enabledModels.length === 0 || enabledModels.includes(m);
+                                const isCustom = (providerModels?.custom_models || []).includes(m);
+                                return `<label class="pc-model-chip ${checked ? 'selected' : ''}" ${isCustom ? 'title="Añadido manualmente"' : ''}>
+                                    <input type="checkbox" value="${m}" ${checked ? 'checked' : ''}
+                                           onchange="this.parentElement.classList.toggle('selected', this.checked)" />
+                                    ${isCustom ? '✎ ' : ''}${m}
+                                </label>`;
+                            }).join('')
+                            : `<span style="color:var(--text-dim);font-size:0.85rem">${hasKey ? 'Haz clic en "Descubrir modelos" para ver los disponibles' : 'Configura la API key primero'}</span>`
+                        }
+                    </div>
+                    <div style="display:flex;gap:0.5rem;align-items:center;margin-top:0.5rem;flex-wrap:wrap">
+                        <input id="pc-custom-${p.id}" placeholder="Añadir modelo manualmente (ej: minimax-01)" style="min-width:250px;font-size:0.8rem" />
+                        <button class="btn-small btn-secondary" onclick="addCustomModel(${p.id})">+ Añadir</button>
+                    </div>
+                    ${allModels.length > 0 ? `
+                    <div class="pc-actions">
+                        <button class="btn-small" onclick="saveProviderModels(${p.id})">Guardar selección</button>
+                        <span id="pc-models-msg-${p.id}" class="pc-msg"></span>
+                    </div>` : ''}
+                </div>
+            </div>
+        `;
+        container.appendChild(card);
+    }
+}
+
+async function saveProviderKey(providerId) {
+    const input = document.getElementById(`pc-key-${providerId}`);
+    const expiryInput = document.getElementById(`pc-expiry-${providerId}`);
+    const msg = document.getElementById(`pc-msg-${providerId}`);
+    const key = input.value.trim();
+    const expiry = expiryInput?.value || null;
+
+    // If no key but expiry changed, update just the expiry
+    if (!key && expiry) {
+        msg.textContent = 'Guardando fecha...';
+        msg.className = 'pc-msg';
+        await api(`/admin/api/providers/${providerId}/expiry`, 'PUT', { expires_at: expiry });
+        msg.textContent = 'Fecha de expiración guardada';
+        msg.className = 'pc-msg success';
+        setTimeout(() => location.reload(), 1500);
+        return;
+    }
+
+    if (!key) {
+        msg.textContent = 'Ingresa una API key';
+        msg.className = 'pc-msg error';
+        return;
+    }
+
+    msg.textContent = 'Guardando...';
+    msg.className = 'pc-msg';
+
+    const body = { api_key: key };
+    if (expiry) body.expires_at = expiry;
+
+    const result = await api(`/admin/api/providers/${providerId}/key`, 'PUT', body);
+    msg.textContent = `Key ${result.status} para ${result.provider}`;
+    msg.className = 'pc-msg success';
+    input.value = '';
+
+    setTimeout(() => location.reload(), 1500);
+}
+
+async function clearProviderKey(providerId) {
+    if (!confirm('¿Borrar la API key de este proveedor?')) return;
+    await api(`/admin/api/providers/${providerId}/key`, 'PUT', { api_key: '' });
+    location.reload();
+}
+
+async function discoverModels(providerId) {
+    const msg = document.getElementById(`pc-msg-${providerId}`);
+    msg.textContent = 'Consultando modelos disponibles...';
+    msg.className = 'pc-msg';
+
+    try {
+        const result = await api(`/admin/api/providers/${providerId}/discover`);
+        const models = result.models || [];
+
+        if (models.length === 0) {
+            msg.textContent = 'No se encontraron modelos. ¿La API key es correcta?';
+            msg.className = 'pc-msg error';
+            return;
+        }
+
+        msg.textContent = `${models.length} modelos encontrados`;
+        msg.className = 'pc-msg success';
+
+        // Get currently enabled models for this provider
+        const provider = cachedProviders.find(p => p.id === providerId);
+        const enabled = provider?.enabled_models || [];
+
+        // Render model chips
+        const grid = document.getElementById(`pc-grid-${providerId}`);
+        grid.innerHTML = models.map(m => {
+            const checked = enabled.length === 0 || enabled.includes(m);
+            return `<label class="pc-model-chip ${checked ? 'selected' : ''}">
+                <input type="checkbox" value="${m}" ${checked ? 'checked' : ''}
+                       onchange="this.parentElement.classList.toggle('selected', this.checked)" />
+                ${m}
+            </label>`;
+        }).join('');
+
+        // Show save button if not already visible
+        const section = document.getElementById(`pc-models-${providerId}`);
+        if (!section.querySelector('.pc-actions')) {
+            const actions = document.createElement('div');
+            actions.className = 'pc-actions';
+            actions.innerHTML = `
+                <button class="btn-small" onclick="saveProviderModels(${providerId})">Guardar selección</button>
+                <span id="pc-models-msg-${providerId}" class="pc-msg"></span>
+            `;
+            section.appendChild(actions);
+        }
+
+        // Update select-all link
+        const h4 = section.querySelector('h4');
+        if (!h4.querySelector('.pc-select-all')) {
+            h4.innerHTML += ` <span class="pc-select-all" onclick="toggleAllModels(${providerId})">seleccionar/deseleccionar todos</span>`;
+        }
+    } catch (e) {
+        msg.textContent = 'Error al consultar: ' + e.message;
+        msg.className = 'pc-msg error';
+    }
+}
+
+function toggleAllModels(providerId) {
+    const grid = document.getElementById(`pc-grid-${providerId}`);
+    const checkboxes = grid.querySelectorAll('input[type="checkbox"]');
+    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+
+    checkboxes.forEach(cb => {
+        cb.checked = !allChecked;
+        cb.parentElement.classList.toggle('selected', !allChecked);
+    });
+}
+
+async function addCustomModel(providerId) {
+    const input = document.getElementById(`pc-custom-${providerId}`);
+    const modelName = input.value.trim();
+    if (!modelName) return;
+
+    // Get current custom models from the provider data
+    const provider = cachedProviders.find(p => p.id === providerId);
+    const providerModels = cachedByProvider.find(bp => bp.provider === provider?.name);
+    const existing = providerModels?.custom_models || [];
+
+    if (existing.includes(modelName) || (providerModels?.all_models || []).includes(modelName)) {
+        input.value = '';
+        return; // already exists
+    }
+
+    const updated = [...existing, modelName];
+    await api(`/admin/api/providers/${providerId}/custom-models`, 'PUT', { custom_models: updated });
+
+    // Add chip to grid immediately
+    const grid = document.getElementById(`pc-grid-${providerId}`);
+    const label = document.createElement('label');
+    label.className = 'pc-model-chip selected';
+    label.title = 'Añadido manualmente';
+    label.innerHTML = `<input type="checkbox" value="${modelName}" checked
+                              onchange="this.parentElement.classList.toggle('selected', this.checked)" />
+                       ✎ ${modelName}`;
+    grid.appendChild(label);
+
+    // Also add to test select
+    const testSel = document.getElementById(`pc-test-model-${providerId}`);
+    if (testSel) {
+        const opt = document.createElement('option');
+        opt.value = modelName;
+        opt.textContent = modelName;
+        testSel.appendChild(opt);
+    }
+
+    input.value = '';
+}
+
+async function testProvider(providerId) {
+    const modelSel = document.getElementById(`pc-test-model-${providerId}`);
+    const msg = document.getElementById(`pc-test-msg-${providerId}`);
+    const resultPre = document.getElementById(`pc-test-result-${providerId}`);
+    const model = modelSel.value;
+
+    if (!model) {
+        msg.textContent = 'Selecciona un modelo';
+        msg.className = 'pc-msg error';
+        return;
+    }
+
+    msg.textContent = 'Enviando test...';
+    msg.className = 'pc-msg';
+    resultPre.style.display = 'none';
+
+    try {
+        const result = await api(`/admin/api/providers/${providerId}/test`, 'POST', { model });
+
+        if (result.success) {
+            msg.innerHTML = `<span style="color:var(--success)">${result.latency_ms}ms · ${result.tokens} tokens</span>`;
+            resultPre.textContent = result.response;
+            resultPre.style.display = 'block';
+        } else {
+            msg.innerHTML = `<span style="color:var(--danger)">Error</span>`;
+            resultPre.textContent = result.error;
+            resultPre.style.display = 'block';
+        }
+    } catch (e) {
+        msg.textContent = 'Error: ' + e.message;
+        msg.className = 'pc-msg error';
+    }
+}
+
+async function saveProviderModels(providerId) {
+    const grid = document.getElementById(`pc-grid-${providerId}`);
+    const msg = document.getElementById(`pc-models-msg-${providerId}`);
+    const checkboxes = grid.querySelectorAll('input[type="checkbox"]');
+    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+
+    let enabledModels = [];
+    if (!allChecked) {
+        checkboxes.forEach(cb => {
+            if (cb.checked) enabledModels.push(cb.value);
+        });
+    }
+    // If all are checked, send empty array (means "all")
+
+    msg.textContent = 'Guardando...';
+    msg.className = 'pc-msg';
+
+    await api(`/admin/api/providers/${providerId}/models`, 'PUT', { enabled_models: enabledModels });
+    msg.textContent = allChecked
+        ? 'Todos los modelos activados'
+        : `${enabledModels.length} modelos activados`;
+    msg.className = 'pc-msg success';
+
+    // Refresh dropdowns
+    setTimeout(() => location.reload(), 1500);
 }
 
 // --- Boot ---

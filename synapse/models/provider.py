@@ -1,4 +1,5 @@
 import datetime
+from typing import Optional
 from sqlalchemy import String, Boolean, Integer, DateTime, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,11 +14,15 @@ class Provider(Base):
     display_name: Mapped[str] = mapped_column(String(100))
     base_url: Mapped[str] = mapped_column(String(500), default="")
     api_key_env: Mapped[str] = mapped_column(String(100), default="")  # env var name for API key
+    api_key_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)  # stored key (overrides env)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     is_local: Mapped[bool] = mapped_column(Boolean, default=False)
     priority: Mapped[int] = mapped_column(Integer, default=10)  # lower = higher priority
     max_concurrent: Mapped[int] = mapped_column(Integer, default=10)
     avg_latency_ms: Mapped[int] = mapped_column(Integer, default=0)  # tracked automatically
+    api_key_expires_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime, nullable=True, default=None
+    )  # when the API key expires (for rotation reminders)
     config_json: Mapped[str] = mapped_column(Text, default="{}")  # extra provider-specific config
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=datetime.datetime.utcnow

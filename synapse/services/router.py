@@ -255,10 +255,11 @@ class RouterEngine:
         return chain
 
     def _get_provider_key(self, provider: Provider) -> str:
-        """Get API key for a provider from environment."""
-        import os
-
+        """Get API key for a provider. DB value takes priority over env var."""
+        if provider.api_key_value:
+            return provider.api_key_value
         if provider.api_key_env:
+            import os
             return os.environ.get(provider.api_key_env, "")
         return ""
 

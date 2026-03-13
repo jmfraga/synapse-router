@@ -333,6 +333,82 @@ select:focus { border-color: var(--accent); outline: none; }
 .intent-builder label { font-size: 0.8rem; }
 .intent-chain-steps { margin: 0.3rem 0; }
 
+/* Key expiry alerts */
+.key-expiry-alert {
+    border-radius: 8px;
+    padding: 0.8rem 1.2rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+}
+.key-expiry-alert.expired { background: rgba(225, 112, 85, 0.15); border: 1px solid var(--danger); color: var(--danger); }
+.key-expiry-alert.warning { background: rgba(253, 203, 110, 0.15); border: 1px solid var(--warning); color: var(--warning); }
+.key-expiry-alert a { color: inherit; text-decoration: underline; }
+
+/* Provider config cards */
+.provider-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 0.5rem;
+    overflow: hidden;
+}
+.provider-card.has-key { border-left: 3px solid var(--success); }
+.provider-card.no-key { border-left: 3px solid var(--text-dim); }
+.pc-header {
+    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+    padding: 0.8rem 1.2rem;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+}
+.pc-header:hover { background: var(--border); }
+.pc-header h3 { font-size: 1rem; margin: 0; }
+.pc-header .pc-chevron {
+    margin-left: auto;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    transition: transform 0.2s;
+}
+.provider-card.open .pc-chevron { transform: rotate(180deg); }
+.pc-body {
+    display: none;
+    padding: 0 1.2rem 1rem;
+}
+.provider-card.open .pc-body { display: block; }
+.pc-key-status { font-size: 0.8rem; padding: 0.2rem 0.5rem; border-radius: 10px; }
+.pc-key-status.configured { background: rgba(0, 184, 148, 0.15); color: var(--success); }
+.pc-key-status.not-configured { background: rgba(139, 143, 163, 0.15); color: var(--text-dim); }
+.pc-key-row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.8rem; flex-wrap: wrap; }
+.pc-key-row input { flex: 1; min-width: 250px; font-family: monospace; }
+.pc-models-section { margin-top: 0.5rem; }
+.pc-models-section h4 { font-size: 0.85rem; color: var(--text-dim); margin-bottom: 0.5rem; }
+.pc-model-grid { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.pc-model-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.25rem 0.6rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.pc-model-chip:hover { border-color: var(--accent); }
+.pc-model-chip.selected { background: rgba(108, 92, 231, 0.15); border-color: var(--accent); color: var(--accent); }
+.pc-model-chip input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
+.pc-discover-btn { font-size: 0.8rem; padding: 0.3rem 0.8rem; }
+.pc-actions { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.8rem; }
+.pc-msg { font-size: 0.8rem; margin-left: 0.5rem; }
+.pc-msg.success { color: var(--success); }
+.pc-msg.error { color: var(--danger); }
+.pc-select-all { font-size: 0.8rem; color: var(--accent); cursor: pointer; margin-left: 0.5rem; }
+.pc-select-all:hover { text-decoration: underline; }
+
 /* Optgroup styling in selects */
 optgroup { color: var(--accent); font-style: normal; font-weight: 600; font-size: 0.85rem; }
 option { color: var(--text); font-weight: 400; }

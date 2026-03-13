@@ -11,6 +11,7 @@
         <h1>⚡ Synapse Router</h1>
         <nav>
             <a href="#providers">Providers</a>
+            <a href="#provider-config">Config APIs</a>
             <a href="#routes">Rutas</a>
             <a href="#smart-routes">Smart Routes</a>
             <a href="#keys">API Keys</a>
@@ -20,6 +21,9 @@
     </header>
 
     <main>
+        <!-- Key Expiry Alerts (populated by JS) -->
+        <div id="key-alerts" style="display:none"></div>
+
         <!-- Stats Overview -->
         <section class="stats-bar">
             <div class="stat">
@@ -71,6 +75,18 @@
                 {% endfor %}
                 </tbody>
             </table>
+        </section>
+
+        <!-- Provider Configuration (External APIs) -->
+        <section id="provider-config">
+            <h2>Configuración de Providers Externos</h2>
+            <p class="section-desc">
+                Configura las API keys de tus proveedores externos y selecciona qué modelos activar.
+                Los modelos activados estarán disponibles en rutas, smart routes y API keys.
+            </p>
+            <div id="provider-config-cards">
+                <!-- Populated by JS -->
+            </div>
         </section>
 
         <!-- Routes -->

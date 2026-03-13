@@ -1,6 +1,7 @@
 """Admin API endpoints for managing providers, routes, and API keys."""
 
 import asyncio
+import datetime
 import json
 import logging
 import os
@@ -83,15 +84,41 @@ class ProviderUpdate(BaseModel):
 async def list_providers(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Provider).order_by(Provider.priority))
     providers = result.scalars().all()
-    return [
-        {
+    out = []
+    for p in providers:
+        config = json.loads(p.config_json) if p.config_json else {}
+        out.append({
             "id": p.id, "name": p.name, "display_name": p.display_name,
             "base_url": p.base_url, "is_enabled": p.is_enabled,
             "is_local": p.is_local, "priority": p.priority,
             "avg_latency_ms": p.avg_latency_ms,
-        }
-        for p in providers
-    ]
+            "has_key": bool(p.api_key_value or (
+                p.api_key_env and os.environ.get(p.api_key_env)
+            )),
+            "key_source": "db" if p.api_key_value else (
+                "env" if p.api_key_env and os.environ.get(p.api_key_env) else ""
+            ),
+            "key_preview": (
+                p.api_key_value[:8] + "..." if p.api_key_value
+                else (os.environ.get(p.api_key_env, "")[:8] + "..."
+                      if p.api_key_env and os.environ.get(p.api_key_env)
+                      else "")
+            ),
+            "enabled_models": config.get("enabled_models", []),
+            "api_key_expires_at": p.api_key_expires_at.isoformat() if p.api_key_expires_at else None,
+            "key_expires_soon": (
+                p.api_key_expires_at is not None
+                and (p.api_key_expires_at - datetime.datetime.utcnow()).days <= 14
+            ) if p.api_key_expires_at else False,
+            "key_expired": (
+                p.api_key_expires_at is not None
+                and p.api_key_expires_at < datetime.datetime.utcnow()
+            ) if p.api_key_expires_at else False,
+            "key_days_left": (
+                (p.api_key_expires_at - datetime.datetime.utcnow()).days
+            ) if p.api_key_expires_at else None,
+        })
+    return out
 
 
 @router.put("/api/providers/{provider_id}")
@@ -106,6 +133,171 @@ async def update_provider(
         setattr(provider, field, value)
     await db.commit()
     return {"status": "ok"}
+
+
+class ProviderKeyUpdate(BaseModel):
+    api_key: str  # empty string to clear
+    expires_at: Optional[str] = None  # ISO date string, e.g. "2026-06-15"
+
+
+@router.put("/api/providers/{provider_id}/key")
+async def set_provider_key(
+    provider_id: int, data: ProviderKeyUpdate, db: AsyncSession = Depends(get_db)
+):
+    provider = await db.get(Provider, provider_id)
+    if not provider:
+        raise HTTPException(404, "Provider not found")
+
+    provider.api_key_value = data.api_key if data.api_key else None
+
+    if data.expires_at:
+        provider.api_key_expires_at = datetime.datetime.fromisoformat(data.expires_at)
+    elif not data.api_key:
+        provider.api_key_expires_at = None  # clear expiry when clearing key
+
+    await db.commit()
+
+    status = "configured" if data.api_key else "cleared"
+    return {"status": status, "provider": provider.display_name}
+
+
+class ProviderExpiryUpdate(BaseModel):
+    expires_at: Optional[str] = None  # ISO date or null to clear
+
+
+@router.put("/api/providers/{provider_id}/expiry")
+async def set_provider_expiry(
+    provider_id: int, data: ProviderExpiryUpdate, db: AsyncSession = Depends(get_db)
+):
+    provider = await db.get(Provider, provider_id)
+    if not provider:
+        raise HTTPException(404, "Provider not found")
+
+    if data.expires_at:
+        provider.api_key_expires_at = datetime.datetime.fromisoformat(data.expires_at)
+    else:
+        provider.api_key_expires_at = None
+    await db.commit()
+    return {"status": "ok", "expires_at": data.expires_at}
+
+
+class ProviderModelsUpdate(BaseModel):
+    enabled_models: list[str]  # empty list = all available
+
+
+@router.put("/api/providers/{provider_id}/models")
+async def set_provider_models(
+    provider_id: int, data: ProviderModelsUpdate, db: AsyncSession = Depends(get_db)
+):
+    provider = await db.get(Provider, provider_id)
+    if not provider:
+        raise HTTPException(404, "Provider not found")
+
+    config = json.loads(provider.config_json) if provider.config_json else {}
+    config["enabled_models"] = data.enabled_models
+    provider.config_json = json.dumps(config)
+    await db.commit()
+    return {"status": "ok", "enabled_models": data.enabled_models}
+
+
+@router.get("/api/providers/{provider_id}/discover")
+async def discover_provider_models(
+    provider_id: int, db: AsyncSession = Depends(get_db)
+):
+    """Fetch all available models from a provider using its configured key."""
+    settings = get_settings()
+    provider = await db.get(Provider, provider_id)
+    if not provider:
+        raise HTTPException(404, "Provider not found")
+
+    key = _get_provider_key(provider, settings)
+    models = await _fetch_models_for_provider(provider, key, settings)
+    return {"provider": provider.name, "models": sorted(models)}
+
+
+class ProviderCustomModels(BaseModel):
+    custom_models: list[str]
+
+
+@router.put("/api/providers/{provider_id}/custom-models")
+async def set_custom_models(
+    provider_id: int, data: ProviderCustomModels, db: AsyncSession = Depends(get_db)
+):
+    provider = await db.get(Provider, provider_id)
+    if not provider:
+        raise HTTPException(404, "Provider not found")
+
+    config = json.loads(provider.config_json) if provider.config_json else {}
+    config["custom_models"] = data.custom_models
+    provider.config_json = json.dumps(config)
+    await db.commit()
+    return {"status": "ok", "custom_models": data.custom_models}
+
+
+class ProviderTestRequest(BaseModel):
+    model: str
+    message: str = "Responde solo con 'OK' si puedes leer esto."
+
+
+@router.post("/api/providers/{provider_id}/test")
+async def test_provider(
+    provider_id: int, data: ProviderTestRequest, db: AsyncSession = Depends(get_db)
+):
+    """Send a quick test request to a provider to verify connectivity."""
+    import time
+    import litellm
+
+    settings = get_settings()
+    provider = await db.get(Provider, provider_id)
+    if not provider:
+        raise HTTPException(404, "Provider not found")
+
+    key = _get_provider_key(provider, settings)
+    if not key and not provider.is_local:
+        return {"success": False, "error": "No API key configured"}
+
+    # Build litellm model string
+    from synapse.services.router import router_engine
+    target = {
+        "provider": provider.name,
+        "model": data.model,
+        "base_url": provider.base_url or "",
+        "api_key": key,
+    }
+    litellm_model = router_engine._to_litellm_model(target)
+
+    try:
+        start = time.monotonic()
+        call_kwargs = {
+            "model": litellm_model,
+            "messages": [{"role": "user", "content": data.message}],
+            "max_tokens": 50,
+            "stream": False,
+        }
+        if target.get("base_url"):
+            call_kwargs["api_base"] = target["base_url"]
+        if key:
+            call_kwargs["api_key"] = key
+
+        response = await litellm.acompletion(**call_kwargs)
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+
+        content = response.choices[0].message.content or ""
+        tokens = response.usage.total_tokens if response.usage else 0
+
+        return {
+            "success": True,
+            "response": content[:200],
+            "latency_ms": elapsed_ms,
+            "tokens": tokens,
+            "model": data.model,
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)[:300],
+            "model": data.model,
+        }
 
 
 # --- API Key Management ---
@@ -328,6 +520,116 @@ async def toggle_smart_route(route_id: int, db: AsyncSession = Depends(get_db)):
     return {"status": "ok", "is_enabled": sr.is_enabled}
 
 
+# --- Helpers for provider key/model resolution ---
+
+KNOWN_MODELS = {
+    "anthropic": [
+        "claude-opus-4-20250514", "claude-sonnet-4-20250514",
+        "claude-sonnet-4-5-20250514",
+        "claude-haiku-4-5-20251001",
+        "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022",
+        "claude-3-opus-20240229",
+    ],
+    "perplexity": [
+        "sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-reasoning",
+        "sonar-deep-research",
+    ],
+}
+
+
+def _get_provider_key(provider: Provider, settings) -> str:
+    """Get API key: DB value > env var > settings map."""
+    if provider.api_key_value:
+        return provider.api_key_value
+    if provider.api_key_env:
+        val = os.environ.get(provider.api_key_env, "")
+        if val:
+            return val
+    # Fallback to settings
+    settings_map = {
+        "groq": settings.groq_api_key,
+        "nvidia": settings.nvidia_api_key,
+        "openai": settings.openai_api_key,
+        "anthropic": settings.anthropic_api_key,
+        "gemini": settings.gemini_api_key,
+        "perplexity": settings.perplexity_api_key,
+    }
+    return settings_map.get(provider.name, "")
+
+
+OPENAI_COMPAT_BASES = {
+    "groq": "https://api.groq.com/openai/v1",
+    "openai": "https://api.openai.com/v1",
+    "nvidia": "https://integrate.api.nvidia.com/v1",
+    "perplexity": "https://api.perplexity.ai",
+}
+
+
+async def _fetch_models_for_provider(provider: Provider, key: str, settings) -> list[str]:
+    """Fetch all available models from a provider via its API."""
+    name = provider.name
+    models = []
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if name == "ollama":
+                resp = await client.get(f"{settings.ollama_base_url}/api/tags")
+                if resp.status_code == 200:
+                    models = [m["name"] for m in resp.json().get("models", [])]
+
+            elif key and name == "anthropic":
+                # Anthropic has /v1/models with x-api-key header
+                resp = await client.get(
+                    "https://api.anthropic.com/v1/models?limit=100",
+                    headers={
+                        "x-api-key": key,
+                        "anthropic-version": "2023-06-01",
+                    },
+                )
+                if resp.status_code == 200:
+                    for m in resp.json().get("data", []):
+                        models.append(m["id"])
+                else:
+                    # Fallback to known models if API fails
+                    models = KNOWN_MODELS.get(name, [])
+
+            elif key and name == "gemini":
+                resp = await client.get(
+                    f"https://generativelanguage.googleapis.com/v1beta/models?key={key}&pageSize=100"
+                )
+                if resp.status_code == 200:
+                    for m in resp.json().get("models", []):
+                        model_id = m.get("name", "").replace("models/", "")
+                        if model_id:
+                            models.append(model_id)
+
+            elif key and name in OPENAI_COMPAT_BASES:
+                # OpenAI-compatible /v1/models endpoint
+                base = provider.base_url or OPENAI_COMPAT_BASES.get(name, "")
+                if base:
+                    url = f"{base.rstrip('/')}/models"
+                    resp = await client.get(
+                        url, headers={"Authorization": f"Bearer {key}"}
+                    )
+                    if resp.status_code == 200:
+                        for m in resp.json().get("data", []):
+                            models.append(m["id"])
+                    elif name in KNOWN_MODELS:
+                        models = KNOWN_MODELS[name]
+
+            elif key and name in KNOWN_MODELS:
+                # Fallback for providers without model listing API
+                models = KNOWN_MODELS[name]
+
+    except Exception as e:
+        logger.debug(f"Could not fetch models for {name}: {e}")
+        # Fallback to known models on error
+        if name in KNOWN_MODELS:
+            models = KNOWN_MODELS[name]
+
+    return models
+
+
 # --- Metrics ---
 
 @router.get("/api/models")
@@ -339,84 +641,37 @@ async def list_available_models(db: AsyncSession = Depends(get_db)):
     )
     providers = result.scalars().all()
 
-    # Known models for providers without a model list API
-    KNOWN_MODELS = {
-        "anthropic": [
-            "claude-opus-4-20250514", "claude-sonnet-4-20250514",
-            "claude-haiku-4-5-20251001", "claude-3-5-sonnet-20241022",
-        ],
-        "perplexity": [
-            "sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-reasoning",
-        ],
-    }
-
-    provider_key_map = {
-        "groq": settings.groq_api_key,
-        "nvidia": settings.nvidia_api_key,
-        "openai": settings.openai_api_key,
-        "anthropic": settings.anthropic_api_key,
-        "gemini": settings.gemini_api_key,
-        "perplexity": settings.perplexity_api_key,
-    }
-
     async def fetch_provider_models(provider: Provider) -> dict:
-        """Fetch models for a single provider."""
         name = provider.name
-        key = provider_key_map.get(name, "")
+        key = _get_provider_key(provider, settings)
         configured = bool(key) or provider.is_local
-        models = []
+        discovered = await _fetch_models_for_provider(provider, key, settings)
 
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                if name == "ollama":
-                    resp = await client.get(f"{settings.ollama_base_url}/api/tags")
-                    if resp.status_code == 200:
-                        models = [m["name"] for m in resp.json().get("models", [])]
+        # Merge custom (manually added) models
+        config = json.loads(provider.config_json) if provider.config_json else {}
+        custom = config.get("custom_models", [])
+        all_models = sorted(set(discovered + custom))
 
-                elif name in KNOWN_MODELS:
-                    if configured:
-                        models = KNOWN_MODELS[name]
-
-                elif key and name in ("groq", "nvidia", "openai"):
-                    # These support the OpenAI-compatible /v1/models endpoint
-                    base = provider.base_url or {
-                        "groq": "https://api.groq.com/openai/v1",
-                        "openai": "https://api.openai.com/v1",
-                    }.get(name, "")
-                    if base:
-                        url = f"{base.rstrip('/')}/models"
-                        resp = await client.get(
-                            url, headers={"Authorization": f"Bearer {key}"}
-                        )
-                        if resp.status_code == 200:
-                            for m in resp.json().get("data", []):
-                                models.append(m["id"])
-
-                elif key and name == "gemini":
-                    resp = await client.get(
-                        f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
-                    )
-                    if resp.status_code == 200:
-                        for m in resp.json().get("models", []):
-                            # name format: "models/gemini-1.5-flash"
-                            model_id = m.get("name", "").replace("models/", "")
-                            if model_id:
-                                models.append(model_id)
-        except Exception as e:
-            logger.debug(f"Could not fetch models for {name}: {e}")
+        # Apply enabled_models filter
+        enabled = config.get("enabled_models", [])
+        if enabled:
+            enabled_set = set(enabled)
+            models = [m for m in all_models if m in enabled_set]
+        else:
+            models = all_models
 
         return {
             "provider": name,
             "display_name": provider.display_name,
             "configured": configured,
             "models": sorted(models),
+            "all_models": all_models,  # full list for config UI
+            "custom_models": custom,
         }
 
-    # Fetch all provider models concurrently
     tasks = [fetch_provider_models(p) for p in providers]
     provider_results = await asyncio.gather(*tasks)
 
-    # Also build flat list for backwards compatibility
     all_models = []
     for pr in provider_results:
         all_models.extend(pr["models"])
