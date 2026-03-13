@@ -213,6 +213,23 @@ async def list_routes(db: AsyncSession = Depends(get_db)):
     ]
 
 
+@router.put("/api/routes/{route_id}")
+async def update_route(
+    route_id: int, data: RouteCreate, db: AsyncSession = Depends(get_db)
+):
+    route = await db.get(Route, route_id)
+    if not route:
+        raise HTTPException(404, "Route not found")
+    route.name = data.name
+    route.description = data.description
+    route.model_pattern = data.model_pattern
+    route.provider_chain = json.dumps(data.provider_chain)
+    route.priority = data.priority
+    route.max_context_tokens = data.max_context_tokens
+    await db.commit()
+    return {"status": "ok"}
+
+
 @router.delete("/api/routes/{route_id}")
 async def delete_route(route_id: int, db: AsyncSession = Depends(get_db)):
     route = await db.get(Route, route_id)

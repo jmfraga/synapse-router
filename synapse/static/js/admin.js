@@ -330,7 +330,67 @@ function removeChainStep(btn) {
     }
 }
 
-async function createRoute() {
+function editRoute(id, name, pattern, priority) {
+    // Show form and populate
+    document.getElementById('route-form').style.display = 'block';
+    document.getElementById('route-edit-id').value = id;
+    document.getElementById('route-name').value = name;
+    document.getElementById('route-priority').value = priority;
+
+    // Set pattern — use input mode for existing routes
+    document.getElementById('route-pattern-select').style.display = 'none';
+    const inp = document.getElementById('route-pattern-input');
+    inp.style.display = '';
+    inp.value = pattern;
+    const link = inp.parentElement.querySelector('.toggle-link');
+    if (link) link.textContent = 'o seleccionar modelo';
+
+    // Populate chain from the table row's data attribute
+    const row = document.querySelector(`tr[data-route]`);
+    // Find the correct row by matching the id in the edit button
+    const rows = document.querySelectorAll('#routes-body tr');
+    let chainData = [];
+    rows.forEach(r => {
+        const editBtn = r.querySelector('button');
+        if (editBtn && editBtn.getAttribute('onclick')?.includes(`editRoute(${id},`)) {
+            try { chainData = JSON.parse(r.dataset.route); } catch {}
+        }
+    });
+
+    // Rebuild chain steps
+    const builder = document.getElementById('route-chain-builder');
+    builder.innerHTML = '';
+    if (chainData.length > 0) {
+        for (const step of chainData) {
+            addChainStep();
+            const lastStep = builder.lastElementChild;
+            lastStep.querySelector('.chain-provider').value = step.provider;
+            lastStep.querySelector('.chain-model').value = step.model;
+        }
+    } else {
+        addChainStep();
+    }
+
+    // Update button
+    document.getElementById('route-submit-btn').textContent = 'Guardar Ruta';
+    document.getElementById('route-cancel-btn').style.display = '';
+
+    // Scroll to form
+    document.getElementById('route-form').scrollIntoView({ behavior: 'smooth' });
+}
+
+function cancelEditRoute() {
+    document.getElementById('route-edit-id').value = '';
+    document.getElementById('route-form').style.display = 'none';
+    document.getElementById('route-submit-btn').textContent = 'Crear Ruta';
+    document.getElementById('route-cancel-btn').style.display = 'none';
+    // Reset fields
+    document.getElementById('route-name').value = '';
+    document.getElementById('route-priority').value = '10';
+}
+
+async function submitRoute() {
+    const editId = document.getElementById('route-edit-id').value;
     const name = document.getElementById('route-name').value.trim();
 
     const sel = document.getElementById('route-pattern-select');
@@ -342,25 +402,20 @@ async function createRoute() {
         return;
     }
 
-    const chain = [];
-    document.querySelectorAll('.chain-step').forEach(step => {
-        const provider = step.querySelector('.chain-provider').value;
-        const model = step.querySelector('.chain-model').value;
-        if (provider && model) {
-            chain.push({ provider, model });
-        }
-    });
-
+    const chain = readChainSteps(document.getElementById('route-chain-builder'));
     if (chain.length === 0) {
         alert('Agrega al menos un provider a la cadena');
         return;
     }
 
     const priority = parseInt(document.getElementById('route-priority').value) || 10;
+    const body = { name, model_pattern: pattern, provider_chain: chain, priority };
 
-    await api('/admin/api/routes', 'POST', {
-        name, model_pattern: pattern, provider_chain: chain, priority
-    });
+    if (editId) {
+        await api(`/admin/api/routes/${editId}`, 'PUT', body);
+    } else {
+        await api('/admin/api/routes', 'POST', body);
+    }
     location.reload();
 }
 
@@ -628,7 +683,75 @@ function readChainSteps(container) {
     return chain;
 }
 
-async function createSmartRoute() {
+function editSmartRoute(id) {
+    const card = document.querySelector(`.smart-route-card[data-id="${id}"]`);
+    if (!card) return;
+    const data = JSON.parse(card.dataset.sr);
+
+    // Show form
+    showSmartRouteForm();
+
+    // Populate fields
+    document.getElementById('sr-edit-id').value = id;
+    document.getElementById('sr-name').value = data.name;
+    document.getElementById('sr-trigger').value = data.trigger_model;
+    document.getElementById('sr-classifier').value = data.classifier_model;
+
+    // Clear and rebuild intents
+    const intentsContainer = document.getElementById('sr-intents');
+    intentsContainer.innerHTML = '';
+    for (const intent of data.intents) {
+        addIntent();
+        const ib = intentsContainer.lastElementChild;
+        ib.querySelector('.intent-name-input').value = intent.name;
+        ib.querySelector('.intent-desc-input').value = intent.description;
+
+        // Rebuild chain steps for this intent
+        const stepsContainer = ib.querySelector('.intent-chain-steps');
+        stepsContainer.innerHTML = '';
+        for (const step of intent.provider_chain) {
+            const addBtn = ib.querySelector('.intent-chain-steps + button');
+            addIntentChainStep(addBtn);
+            const lastStep = stepsContainer.lastElementChild;
+            lastStep.querySelector('.chain-provider').value = step.provider;
+            lastStep.querySelector('.chain-model').value = step.model;
+        }
+    }
+
+    // Rebuild default chain
+    const defaultContainer = document.getElementById('sr-default-chain');
+    defaultContainer.innerHTML = '';
+    const defaultChain = data.default_chain || [];
+    for (const step of defaultChain) {
+        addDefaultChainStep();
+        const lastStep = defaultContainer.lastElementChild;
+        lastStep.querySelector('.chain-provider').value = step.provider;
+        lastStep.querySelector('.chain-model').value = step.model;
+    }
+    if (defaultChain.length === 0) addDefaultChainStep();
+
+    // Update buttons
+    document.getElementById('sr-submit-btn').textContent = 'Guardar Smart Route';
+    document.getElementById('sr-cancel-btn').style.display = '';
+
+    // Scroll to form
+    document.getElementById('smart-route-form').scrollIntoView({ behavior: 'smooth' });
+}
+
+function cancelEditSmartRoute() {
+    document.getElementById('sr-edit-id').value = '';
+    document.getElementById('smart-route-form').style.display = 'none';
+    document.getElementById('sr-submit-btn').textContent = 'Crear Smart Route';
+    document.getElementById('sr-cancel-btn').style.display = 'none';
+    // Reset fields
+    document.getElementById('sr-name').value = '';
+    document.getElementById('sr-trigger').value = 'auto';
+    document.getElementById('sr-intents').innerHTML = '';
+    document.getElementById('sr-default-chain').innerHTML = '';
+}
+
+async function submitSmartRoute() {
+    const editId = document.getElementById('sr-edit-id').value;
     const name = document.getElementById('sr-name').value.trim();
     const trigger = document.getElementById('sr-trigger').value.trim();
     const classifier = document.getElementById('sr-classifier').value;
@@ -638,7 +761,6 @@ async function createSmartRoute() {
         return;
     }
 
-    // Collect intents
     const intents = [];
     document.querySelectorAll('#sr-intents .intent-builder').forEach(ib => {
         const intentName = ib.querySelector('.intent-name-input').value.trim();
@@ -655,14 +777,16 @@ async function createSmartRoute() {
     }
 
     const defaultChain = readChainSteps(document.getElementById('sr-default-chain'));
+    const body = {
+        name, trigger_model: trigger, classifier_model: classifier,
+        intents, default_chain: defaultChain,
+    };
 
-    await api('/admin/api/smart-routes', 'POST', {
-        name,
-        trigger_model: trigger,
-        classifier_model: classifier,
-        intents,
-        default_chain: defaultChain,
-    });
+    if (editId) {
+        await api(`/admin/api/smart-routes/${editId}`, 'PUT', body);
+    } else {
+        await api('/admin/api/smart-routes', 'POST', body);
+    }
     location.reload();
 }
 

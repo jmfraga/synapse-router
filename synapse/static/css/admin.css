@@ -206,6 +206,8 @@ label { font-size: 0.9rem; color: var(--text-dim); margin-right: 1rem; }
 }
 .btn-danger { background: var(--danger); }
 .btn-danger:hover { background: #c0392b; }
+.btn-secondary { background: var(--border); color: var(--text); }
+.btn-secondary:hover { background: var(--text-dim); }
 
 /* Select styling */
 select {

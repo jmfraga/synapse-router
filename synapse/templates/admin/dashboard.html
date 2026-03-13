@@ -114,7 +114,9 @@
                     <label for="route-priority">Prioridad</label>
                     <input id="route-priority" type="number" value="10" min="1" max="100" style="width:80px" />
                 </div>
-                <button onclick="createRoute()">Crear Ruta</button>
+                <input type="hidden" id="route-edit-id" value="" />
+                <button id="route-submit-btn" onclick="submitRoute()">Crear Ruta</button>
+                <button id="route-cancel-btn" style="display:none" class="btn-secondary" onclick="cancelEditRoute()">Cancelar</button>
             </div>
             <table>
                 <thead>
@@ -129,7 +131,7 @@
                 </thead>
                 <tbody id="routes-body">
                 {% for r in routes %}
-                    <tr>
+                    <tr data-route='{{ r.provider_chain }}'>
                         <td>{{ r.name }}</td>
                         <td><code>{{ r.model_pattern }}</code></td>
                         <td><code>{{ r.provider_chain }}</code></td>
@@ -140,7 +142,8 @@
                             </span>
                         </td>
                         <td>
-                            <button onclick="deleteRoute({{ r.id }})">Eliminar</button>
+                            <button onclick="editRoute({{ r.id }}, '{{ r.name }}', '{{ r.model_pattern }}', {{ r.priority }})">Editar</button>
+                            <button class="btn-danger" onclick="deleteRoute({{ r.id }})">Eliminar</button>
                         </td>
                     </tr>
                 {% endfor %}
@@ -193,11 +196,14 @@
                     <button type="button" class="btn-small" onclick="addDefaultChainStep()">+ Agregar provider</button>
                 </div>
 
-                <button onclick="createSmartRoute()">Crear Smart Route</button>
+                <input type="hidden" id="sr-edit-id" value="" />
+                <button id="sr-submit-btn" onclick="submitSmartRoute()">Crear Smart Route</button>
+                <button id="sr-cancel-btn" style="display:none" class="btn-secondary" onclick="cancelEditSmartRoute()">Cancelar</button>
             </div>
 
             {% for sr in smart_routes %}
-            <div class="smart-route-card" data-id="{{ sr.id }}">
+            <div class="smart-route-card" data-id="{{ sr.id }}"
+                 data-sr='{{ sr | tojson }}'>
                 <div class="sr-header">
                     <h3>{{ sr.name }}</h3>
                     <div class="sr-meta">
@@ -207,6 +213,7 @@
                         </span>
                     </div>
                     <div class="sr-actions">
+                        <button onclick="editSmartRoute({{ sr.id }})">Editar</button>
                         <button onclick="toggleSmartRoute({{ sr.id }})">
                             {{ "Desactivar" if sr.is_enabled else "Activar" }}
                         </button>
