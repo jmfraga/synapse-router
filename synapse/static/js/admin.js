@@ -487,5 +487,191 @@ async function sendPlayground() {
     }
 }
 
+// --- Smart Routes ---
+function showSmartRouteForm() {
+    const form = document.getElementById('smart-route-form');
+    form.style.display = form.style.display === 'none' ? 'block' : 'none';
+
+    // Populate classifier model select if empty
+    const sel = document.getElementById('sr-classifier');
+    if (sel.options.length <= 1) {
+        populateModelSelect('sr-classifier', cachedByProvider, cachedModels);
+    }
+
+    // Add initial intent if none exist
+    if (document.getElementById('sr-intents').children.length === 0) {
+        addIntent();
+    }
+    // Add initial default chain step
+    if (document.getElementById('sr-default-chain').children.length === 0) {
+        addDefaultChainStep();
+    }
+}
+
+function addIntent() {
+    const container = document.getElementById('sr-intents');
+    const index = container.children.length;
+
+    const providerOptions = cachedProviders
+        .map(p => `<option value="${p.name}">${p.display_name}</option>`)
+        .join('');
+
+    const div = document.createElement('div');
+    div.className = 'intent-builder';
+    div.innerHTML = `
+        <div class="form-row">
+            <div class="form-group" style="flex:0 0 150px">
+                <label>Nombre</label>
+                <input class="intent-name-input" placeholder="e.g. coding" />
+            </div>
+            <div class="form-group" style="flex:1">
+                <label>Descripción (para el clasificador)</label>
+                <input class="intent-desc-input" placeholder="e.g. Programación, debugging, revisión de código" />
+            </div>
+            <div class="form-group" style="flex:0 0 30px">
+                <label>&nbsp;</label>
+                <button type="button" class="btn-small btn-danger" onclick="this.closest('.intent-builder').remove()">✕</button>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Cadena de providers para esta intención</label>
+            <div class="intent-chain-steps">
+                <div class="chain-step">
+                    <select class="chain-provider">
+                        <option value="">-- Provider --</option>
+                        ${providerOptions}
+                    </select>
+                    <select class="chain-model">
+                        <option value="">-- Modelo --</option>
+                    </select>
+                    <button type="button" class="btn-small btn-danger" onclick="removeIntentChainStep(this)">✕</button>
+                </div>
+            </div>
+            <button type="button" class="btn-small" onclick="addIntentChainStep(this)">+ Provider</button>
+        </div>
+    `;
+    container.appendChild(div);
+
+    // Populate model selects
+    div.querySelectorAll('.chain-model').forEach(populateSingleChainModel);
+}
+
+function addIntentChainStep(btn) {
+    const stepsContainer = btn.previousElementSibling;
+    const providerOptions = cachedProviders
+        .map(p => `<option value="${p.name}">${p.display_name}</option>`)
+        .join('');
+
+    const div = document.createElement('div');
+    div.className = 'chain-step';
+    div.innerHTML = `
+        <select class="chain-provider">
+            <option value="">-- Provider --</option>
+            ${providerOptions}
+        </select>
+        <select class="chain-model">
+            <option value="">-- Modelo --</option>
+        </select>
+        <button type="button" class="btn-small btn-danger" onclick="removeIntentChainStep(this)">✕</button>
+    `;
+    stepsContainer.appendChild(div);
+    populateSingleChainModel(div.querySelector('.chain-model'));
+}
+
+function removeIntentChainStep(btn) {
+    const steps = btn.closest('.intent-chain-steps');
+    if (steps.children.length > 1) {
+        btn.closest('.chain-step').remove();
+    }
+}
+
+function addDefaultChainStep() {
+    const container = document.getElementById('sr-default-chain');
+    const providerOptions = cachedProviders
+        .map(p => `<option value="${p.name}">${p.display_name}</option>`)
+        .join('');
+
+    const div = document.createElement('div');
+    div.className = 'chain-step';
+    div.innerHTML = `
+        <select class="chain-provider">
+            <option value="">-- Provider --</option>
+            ${providerOptions}
+        </select>
+        <select class="chain-model">
+            <option value="">-- Modelo --</option>
+        </select>
+        <button type="button" class="btn-small btn-danger" onclick="removeDefaultChainStep(this)">✕</button>
+    `;
+    container.appendChild(div);
+    populateSingleChainModel(div.querySelector('.chain-model'));
+}
+
+function removeDefaultChainStep(btn) {
+    const container = document.getElementById('sr-default-chain');
+    if (container.children.length > 1) {
+        btn.closest('.chain-step').remove();
+    }
+}
+
+function readChainSteps(container) {
+    const chain = [];
+    container.querySelectorAll('.chain-step').forEach(step => {
+        const provider = step.querySelector('.chain-provider').value;
+        const model = step.querySelector('.chain-model').value;
+        if (provider && model) chain.push({ provider, model });
+    });
+    return chain;
+}
+
+async function createSmartRoute() {
+    const name = document.getElementById('sr-name').value.trim();
+    const trigger = document.getElementById('sr-trigger').value.trim();
+    const classifier = document.getElementById('sr-classifier').value;
+
+    if (!name || !trigger || !classifier) {
+        alert('Nombre, modelo trigger, y clasificador son requeridos');
+        return;
+    }
+
+    // Collect intents
+    const intents = [];
+    document.querySelectorAll('#sr-intents .intent-builder').forEach(ib => {
+        const intentName = ib.querySelector('.intent-name-input').value.trim();
+        const intentDesc = ib.querySelector('.intent-desc-input').value.trim();
+        const chain = readChainSteps(ib.querySelector('.intent-chain-steps'));
+        if (intentName && chain.length > 0) {
+            intents.push({ name: intentName, description: intentDesc, provider_chain: chain });
+        }
+    });
+
+    if (intents.length === 0) {
+        alert('Agrega al menos una intención con su cadena de providers');
+        return;
+    }
+
+    const defaultChain = readChainSteps(document.getElementById('sr-default-chain'));
+
+    await api('/admin/api/smart-routes', 'POST', {
+        name,
+        trigger_model: trigger,
+        classifier_model: classifier,
+        intents,
+        default_chain: defaultChain,
+    });
+    location.reload();
+}
+
+async function toggleSmartRoute(id) {
+    await api(`/admin/api/smart-routes/${id}/toggle`, 'PUT');
+    location.reload();
+}
+
+async function deleteSmartRoute(id) {
+    if (!confirm('¿Eliminar este smart route?')) return;
+    await api(`/admin/api/smart-routes/${id}`, 'DELETE');
+    location.reload();
+}
+
 // --- Boot ---
 document.addEventListener('DOMContentLoaded', initDropdowns);

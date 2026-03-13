@@ -9,7 +9,8 @@ import litellm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from synapse.models import Route, Provider, UsageLog
+from synapse.models import Route, Provider, UsageLog, SmartRoute
+from synapse.services.classifier import classify_intent
 
 logger = logging.getLogger("synapse.router")
 
@@ -22,11 +23,18 @@ class RouterEngine:
     def __init__(self):
         self._provider_latencies: dict[str, float] = {}
 
-    async def resolve_route(self, model: str, db: AsyncSession) -> list[dict]:
+    async def resolve_route(
+        self, model: str, db: AsyncSession, messages: list[dict] | None = None,
+    ) -> list[dict]:
         """Find the best provider chain for a given model request.
 
         Returns ordered list of {provider, model, base_url, api_key} dicts.
         """
+        # 0. Check smart routes (intent-based routing)
+        smart = await self._check_smart_route(model, messages, db)
+        if smart is not None:
+            return smart
+
         # 1. Check explicit routes first
         stmt = (
             select(Route)
@@ -54,7 +62,7 @@ class RouterEngine:
         **kwargs,
     ):
         """Route a completion request through the provider chain."""
-        chain = await self.resolve_route(model, db)
+        chain = await self.resolve_route(model, db, messages=messages)
 
         if not chain:
             raise ValueError(f"No available provider for model: {model}")
@@ -120,6 +128,40 @@ class RouterEngine:
                 continue
 
         raise last_error or ValueError("All providers in chain failed")
+
+    async def _check_smart_route(
+        self, model: str, messages: list[dict] | None, db: AsyncSession,
+    ) -> list[dict] | None:
+        """Check if the model name matches a smart route trigger."""
+        stmt = select(SmartRoute).where(
+            SmartRoute.trigger_model == model,
+            SmartRoute.is_enabled.is_(True),
+        )
+        result = await db.execute(stmt)
+        smart_route = result.scalar_one_or_none()
+
+        if not smart_route:
+            return None
+
+        # Extract the user message for classification
+        user_message = ""
+        if messages:
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    content = msg.get("content", "")
+                    if isinstance(content, str):
+                        user_message = content
+                    break
+
+        if not user_message:
+            logger.warning("Smart route triggered but no user message found, using default")
+            import json
+            default_chain = json.loads(smart_route.default_chain_json)
+            return await self._resolve_chain(default_chain, db)
+
+        intent_name, chain = await classify_intent(user_message, smart_route, db)
+        logger.info(f"Smart route '{smart_route.name}': intent={intent_name}")
+        return await self._resolve_chain(chain, db)
 
     def _matches_pattern(self, model: str, pattern: str) -> bool:
         """Check if a model name matches a route pattern. Supports * wildcard."""

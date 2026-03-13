@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from synapse.config import get_settings
 from synapse.database import get_db
-from synapse.models import Provider, ApiKey, UsageLog, Route
+from synapse.models import Provider, ApiKey, UsageLog, Route, SmartRoute
 from synapse.services.auth import hash_key
 
 logger = logging.getLogger("synapse.admin")
@@ -32,6 +32,22 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     providers = (await db.execute(select(Provider).order_by(Provider.priority))).scalars().all()
     keys = (await db.execute(select(ApiKey))).scalars().all()
     routes = (await db.execute(select(Route).order_by(Route.priority))).scalars().all()
+    smart_routes = (await db.execute(select(SmartRoute))).scalars().all()
+
+    # Parse intents for display
+    smart_routes_data = []
+    for sr in smart_routes:
+        intents = json.loads(sr.intents_json) if sr.intents_json else []
+        smart_routes_data.append({
+            "id": sr.id,
+            "name": sr.name,
+            "description": sr.description,
+            "trigger_model": sr.trigger_model,
+            "classifier_model": sr.classifier_model,
+            "intents": intents,
+            "default_chain": json.loads(sr.default_chain_json) if sr.default_chain_json else [],
+            "is_enabled": sr.is_enabled,
+        })
 
     # Usage stats
     total_requests = (await db.execute(select(func.count(UsageLog.id)))).scalar() or 0
@@ -43,6 +59,7 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         "providers": providers,
         "api_keys": keys,
         "routes": routes,
+        "smart_routes": smart_routes_data,
         "stats": {
             "total_requests": total_requests,
             "total_cost": round(total_cost, 4),
@@ -190,6 +207,94 @@ async def delete_route(route_id: int, db: AsyncSession = Depends(get_db)):
     await db.delete(route)
     await db.commit()
     return {"status": "deleted"}
+
+
+# --- Smart Routes (Intent-Based Routing) ---
+
+class IntentConfig(BaseModel):
+    name: str              # e.g. "coding"
+    description: str       # e.g. "Programación, debugging, revisión de código"
+    provider_chain: list[dict]  # [{provider, model}, ...]
+
+
+class SmartRouteCreate(BaseModel):
+    name: str
+    description: str = ""
+    trigger_model: str             # e.g. "auto"
+    classifier_model: str          # e.g. "llama3.1:8b"
+    classifier_prompt: str = ""    # auto-generated if empty
+    intents: list[IntentConfig]
+    default_chain: list[dict]      # fallback chain
+
+
+@router.post("/api/smart-routes")
+async def create_smart_route(data: SmartRouteCreate, db: AsyncSession = Depends(get_db)):
+    sr = SmartRoute(
+        name=data.name,
+        description=data.description,
+        trigger_model=data.trigger_model,
+        classifier_model=data.classifier_model,
+        classifier_prompt=data.classifier_prompt,
+        intents_json=json.dumps([i.model_dump() for i in data.intents]),
+        default_chain_json=json.dumps(data.default_chain),
+    )
+    db.add(sr)
+    await db.commit()
+    return {"status": "ok", "id": sr.id, "trigger_model": sr.trigger_model}
+
+
+@router.get("/api/smart-routes")
+async def list_smart_routes(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(SmartRoute))
+    routes = result.scalars().all()
+    return [
+        {
+            "id": sr.id, "name": sr.name, "description": sr.description,
+            "trigger_model": sr.trigger_model, "classifier_model": sr.classifier_model,
+            "intents": json.loads(sr.intents_json),
+            "default_chain": json.loads(sr.default_chain_json),
+            "is_enabled": sr.is_enabled,
+        }
+        for sr in routes
+    ]
+
+
+@router.put("/api/smart-routes/{route_id}")
+async def update_smart_route(
+    route_id: int, data: SmartRouteCreate, db: AsyncSession = Depends(get_db)
+):
+    sr = await db.get(SmartRoute, route_id)
+    if not sr:
+        raise HTTPException(404, "Smart route not found")
+    sr.name = data.name
+    sr.description = data.description
+    sr.trigger_model = data.trigger_model
+    sr.classifier_model = data.classifier_model
+    sr.classifier_prompt = data.classifier_prompt
+    sr.intents_json = json.dumps([i.model_dump() for i in data.intents])
+    sr.default_chain_json = json.dumps(data.default_chain)
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/api/smart-routes/{route_id}")
+async def delete_smart_route(route_id: int, db: AsyncSession = Depends(get_db)):
+    sr = await db.get(SmartRoute, route_id)
+    if not sr:
+        raise HTTPException(404, "Smart route not found")
+    await db.delete(sr)
+    await db.commit()
+    return {"status": "deleted"}
+
+
+@router.put("/api/smart-routes/{route_id}/toggle")
+async def toggle_smart_route(route_id: int, db: AsyncSession = Depends(get_db)):
+    sr = await db.get(SmartRoute, route_id)
+    if not sr:
+        raise HTTPException(404, "Smart route not found")
+    sr.is_enabled = not sr.is_enabled
+    await db.commit()
+    return {"status": "ok", "is_enabled": sr.is_enabled}
 
 
 # --- Metrics ---

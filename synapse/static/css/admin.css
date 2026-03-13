@@ -279,6 +279,58 @@ select:focus { border-color: var(--accent); outline: none; }
 }
 .ms-group-header:first-child { border-top: none; margin-top: 0; }
 
+/* Smart Routes */
+.section-desc { font-size: 0.85rem; color: var(--text-dim); margin-bottom: 1rem; }
+.hint-inline { font-size: 0.8rem; color: var(--text-dim); font-weight: 400; }
+
+.smart-route-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.2rem;
+    margin: 1rem 0;
+}
+.sr-header { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.sr-header h3 { font-size: 1rem; margin: 0; flex: 1; }
+.sr-meta { display: flex; gap: 0.8rem; align-items: center; }
+.sr-actions { display: flex; gap: 0.5rem; }
+.sr-detail { font-size: 0.85rem; color: var(--text-dim); margin: 0.5rem 0; }
+
+.sr-intents-display { margin-top: 0.8rem; }
+.intent-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.5rem 0.8rem;
+    border-radius: 6px;
+    margin-bottom: 0.3rem;
+    background: var(--bg);
+    font-size: 0.85rem;
+}
+.intent-row:hover { border-color: var(--accent); }
+.intent-name {
+    font-weight: 600;
+    color: var(--accent);
+    min-width: 80px;
+}
+.intent-desc { color: var(--text-dim); flex: 1; }
+.intent-chain { white-space: nowrap; }
+.intent-chain code { margin: 0 0.1rem; }
+.intent-default { opacity: 0.7; border-left: 2px solid var(--warning); }
+
+/* Smart route form — intent builder */
+.smart-form { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem; }
+.intent-builder {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.8rem;
+    margin-bottom: 0.5rem;
+}
+.intent-builder .form-row { margin-bottom: 0.4rem; }
+.intent-builder label { font-size: 0.8rem; }
+.intent-chain-steps { margin: 0.3rem 0; }
+
 /* Optgroup styling in selects */
 optgroup { color: var(--accent); font-style: normal; font-weight: 600; font-size: 0.85rem; }
 option { color: var(--text); font-weight: 400; }
