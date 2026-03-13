@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from synapse.config import get_settings
 from synapse.database import init_db, async_session
-from synapse.routers import completions, admin
+from synapse.routers import completions, admin, audio
 from synapse.services.seed import seed_providers
 
 load_dotenv()
@@ -36,12 +36,13 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Synapse Router",
     description="Router inteligente de LLMs",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
 app.mount("/static", StaticFiles(directory="synapse/static"), name="static")
 app.include_router(completions.router)
+app.include_router(audio.router)
 app.include_router(admin.router)
 
 

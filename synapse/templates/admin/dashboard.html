@@ -14,6 +14,7 @@
             <a href="#routes">Rutas</a>
             <a href="#smart-routes">Smart Routes</a>
             <a href="#keys">API Keys</a>
+            <a href="#audio">Audio</a>
             <a href="#metrics">Métricas</a>
             <a href="#playground">Playground</a>
         </nav>
@@ -340,6 +341,95 @@
                 {% endfor %}
                 </tbody>
             </table>
+        </section>
+
+        <!-- Audio -->
+        <section id="audio">
+            <h2>Audio <span class="hint-inline">(STT + TTS)</span></h2>
+            <p class="section-desc">
+                Transcripción de voz a texto (Whisper local) y síntesis de texto a voz (macOS).
+            </p>
+            <div id="audio-models-info">
+                <!-- Populated by JS -->
+            </div>
+
+            <div class="smart-form" style="margin-top:1rem">
+                <h3 style="margin-bottom:0.8rem">Transcripción (STT)</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="audio-key">API Key</label>
+                        <input id="audio-key" placeholder="Pegar key (syn-...)" />
+                    </div>
+                    <div class="form-group">
+                        <label for="audio-stt-model">Modelo</label>
+                        <select id="audio-stt-model">
+                            <option value="whisper-large-v3">whisper-large-v3 (mejor calidad)</option>
+                            <option value="whisper-medium">whisper-medium (balance)</option>
+                            <option value="whisper-base">whisper-base (más rápido)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="audio-stt-lang">Idioma</label>
+                        <select id="audio-stt-lang">
+                            <option value="es">Español</option>
+                            <option value="en">English</option>
+                            <option value="auto">Auto-detectar</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="audio-stt-file">Archivo de audio</label>
+                        <input type="file" id="audio-stt-file" accept="audio/*" />
+                    </div>
+                    <div class="form-group" style="display:flex;flex-direction:column;justify-content:flex-end">
+                        <button id="audio-record-btn" onclick="toggleRecording()">Grabar</button>
+                    </div>
+                    <div class="form-group" style="display:flex;flex-direction:column;justify-content:flex-end">
+                        <button onclick="transcribeAudio()">Transcribir</button>
+                    </div>
+                </div>
+                <div id="audio-stt-status" class="pc-msg" style="margin:0.5rem 0"></div>
+                <pre id="audio-stt-result" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.8rem;white-space:pre-wrap;min-height:2rem"></pre>
+            </div>
+
+            <div class="smart-form" style="margin-top:1.5rem">
+                <h3 style="margin-bottom:0.8rem">Texto a Voz (TTS)</h3>
+                <div class="form-row">
+                    <div class="form-group" style="flex:1">
+                        <label for="audio-tts-text">Texto</label>
+                        <textarea id="audio-tts-text" placeholder="Escribe el texto a convertir en voz..." rows="2"></textarea>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="audio-tts-voice">Voz</label>
+                        <select id="audio-tts-voice">
+                            <optgroup label="Español">
+                                <option value="paulina" selected>Paulina (es-MX)</option>
+                                <option value="monica">Mónica (es-ES)</option>
+                                <option value="jorge">Jorge (es-ES)</option>
+                                <option value="juan">Juan (es-MX)</option>
+                            </optgroup>
+                            <optgroup label="English">
+                                <option value="allison">Allison (en-US)</option>
+                                <option value="samantha">Samantha (en-US)</option>
+                                <option value="tom">Tom (en-US)</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="audio-tts-speed">Velocidad</label>
+                        <input id="audio-tts-speed" type="range" min="0.5" max="2" step="0.1" value="1" style="width:120px" />
+                        <span id="audio-tts-speed-label" style="font-size:0.85rem;color:var(--text-dim)">1.0x</span>
+                    </div>
+                    <div class="form-group" style="display:flex;flex-direction:column;justify-content:flex-end">
+                        <button onclick="generateSpeech()">Generar</button>
+                    </div>
+                </div>
+                <div id="audio-tts-status" class="pc-msg" style="margin:0.5rem 0"></div>
+                <audio id="audio-tts-player" controls style="display:none;width:100%;margin-top:0.5rem"></audio>
+            </div>
         </section>
 
         <!-- Metrics -->

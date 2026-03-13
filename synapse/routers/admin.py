@@ -21,6 +21,8 @@ from synapse.config import get_settings
 from synapse.database import get_db
 from synapse.models import Provider, ApiKey, UsageLog, Route, SmartRoute
 from synapse.services.auth import hash_key
+from synapse.services.model_types import classify_model_type, filter_language_models
+from synapse.routers.audio import get_audio_models
 
 logger = logging.getLogger("synapse.admin")
 templates = Jinja2Templates(directory="synapse/templates")
@@ -281,7 +283,10 @@ async def discover_provider_models(
 
     key = _get_provider_key(provider, settings)
     models = await _fetch_models_for_provider(provider, key, settings)
-    return {"provider": provider.name, "models": sorted(models)}
+    models_typed = [
+        {"name": m, "type": classify_model_type(m)} for m in sorted(models)
+    ]
+    return {"provider": provider.name, "models": sorted(models), "models_typed": models_typed}
 
 
 class ProviderCustomModels(BaseModel):
@@ -702,8 +707,14 @@ async def _fetch_models_for_provider(provider: Provider, key: str, settings) -> 
 # --- Metrics ---
 
 @router.get("/api/models")
-async def list_available_models(db: AsyncSession = Depends(get_db)):
-    """Query all enabled providers for their available models."""
+async def list_available_models(
+    model_type: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Query all enabled providers for their available models.
+
+    Optional filter: ?model_type=language (language, image, tts, audio, embedding, moderation, rerank)
+    """
     settings = get_settings()
     result = await db.execute(
         select(Provider).where(Provider.is_enabled.is_(True)).order_by(Provider.priority)
@@ -729,12 +740,26 @@ async def list_available_models(db: AsyncSession = Depends(get_db)):
         else:
             models = all_models
 
+        # Classify each model
+        models_with_types = [
+            {"name": m, "type": classify_model_type(m)} for m in sorted(models)
+        ]
+        all_models_with_types = [
+            {"name": m, "type": classify_model_type(m)} for m in all_models
+        ]
+
+        # Apply type filter if requested
+        if model_type:
+            models_with_types = [m for m in models_with_types if m["type"] == model_type]
+
         return {
             "provider": name,
             "display_name": provider.display_name,
             "configured": configured,
-            "models": sorted(models),
-            "all_models": all_models,  # full list for config UI
+            "models": [m["name"] for m in models_with_types],
+            "models_typed": models_with_types,
+            "all_models": all_models,
+            "all_models_typed": all_models_with_types,
             "custom_models": custom,
         }
 
@@ -742,13 +767,30 @@ async def list_available_models(db: AsyncSession = Depends(get_db)):
     provider_results = await asyncio.gather(*tasks)
 
     all_models = []
+    all_models_typed = []
     for pr in provider_results:
         all_models.extend(pr["models"])
+        all_models_typed.extend(pr["models_typed"])
+
+    # Deduplicate
+    seen = set()
+    unique_typed = []
+    for m in all_models_typed:
+        if m["name"] not in seen:
+            seen.add(m["name"])
+            unique_typed.append(m)
 
     return {
         "models": sorted(set(all_models)),
+        "models_typed": sorted(unique_typed, key=lambda x: x["name"]),
         "by_provider": provider_results,
     }
+
+
+@router.get("/api/audio-models")
+async def list_audio_models():
+    """List available local audio models (STT + TTS)."""
+    return get_audio_models()
 
 
 @router.get("/api/services")

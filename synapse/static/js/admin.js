@@ -2,8 +2,29 @@ const API = '';
 
 // --- Cached data ---
 let cachedModels = [];          // flat list of all model names
-let cachedByProvider = [];      // [{provider, display_name, configured, models}]
+let cachedModelsTyped = [];     // [{name, type}]
+let cachedByProvider = [];      // [{provider, display_name, configured, models, models_typed, all_models_typed}]
 let cachedProviders = [];       // from /api/providers
+
+// --- Model type config ---
+const MODEL_TYPE_LABELS = {
+    language: 'LLM',
+    image: 'Imagen',
+    tts: 'TTS',
+    audio: 'Audio',
+    embedding: 'Embedding',
+    moderation: 'Moderación',
+    rerank: 'Rerank',
+};
+const MODEL_TYPE_COLORS = {
+    language: '#4ecdc4',
+    image: '#ff6b6b',
+    tts: '#ffd93d',
+    audio: '#6c5ce7',
+    embedding: '#a29bfe',
+    moderation: '#fd79a8',
+    rerank: '#81ecec',
+};
 
 // --- Generic API helper ---
 async function api(path, method = 'GET', body = null) {
@@ -137,7 +158,7 @@ function createMultiSelect(containerId, options, opts = {}) {
 }
 
 // --- Populate selects with optgroups by provider ---
-function populateModelSelect(selectId, byProvider, flat) {
+function populateModelSelect(selectId, byProvider, flat, filterType) {
     const el = document.getElementById(selectId);
     if (!el) return;
 
@@ -146,11 +167,18 @@ function populateModelSelect(selectId, byProvider, flat) {
 
     if (byProvider && byProvider.length > 0) {
         for (const pg of byProvider) {
-            if (pg.models.length === 0) continue;
+            // Use typed models if available and filter requested
+            let models = pg.models;
+            if (filterType && pg.models_typed) {
+                models = pg.models_typed
+                    .filter(m => m.type === filterType)
+                    .map(m => m.name);
+            }
+            if (models.length === 0) continue;
             const group = document.createElement('optgroup');
             const status = pg.configured ? '' : ' (sin key)';
             group.label = `${pg.display_name}${status}`;
-            for (const m of pg.models) {
+            for (const m of models) {
                 const opt = document.createElement('option');
                 opt.value = m;
                 opt.textContent = m;
@@ -160,13 +188,30 @@ function populateModelSelect(selectId, byProvider, flat) {
             el.appendChild(group);
         }
     } else {
-        for (const m of flat) {
+        const filteredFlat = filterType
+            ? flat.filter(m => getModelType(m) === filterType)
+            : flat;
+        for (const m of filteredFlat) {
             const opt = document.createElement('option');
             opt.value = m;
             opt.textContent = m;
             el.appendChild(opt);
         }
     }
+}
+
+// Get model type from cached typed data
+function getModelType(modelName) {
+    const found = cachedModelsTyped.find(m => m.name === modelName);
+    return found ? found.type : 'language';
+}
+
+// Get type badge HTML for a model
+function modelTypeBadge(type) {
+    if (type === 'language') return '';  // don't badge the default
+    const label = MODEL_TYPE_LABELS[type] || type;
+    const color = MODEL_TYPE_COLORS[type] || '#888';
+    return `<span class="model-type-badge" style="background:${color}20;color:${color};border:1px solid ${color}40;padding:0 4px;border-radius:3px;font-size:0.7rem;margin-left:4px">${label}</span>`;
 }
 
 // --- Init: populate all dropdowns on page load ---
@@ -178,12 +223,13 @@ async function initDropdowns() {
     ]);
 
     cachedModels = modelsData.models || [];
+    cachedModelsTyped = modelsData.models_typed || [];
     cachedByProvider = modelsData.by_provider || [];
     cachedProviders = providersData || [];
 
-    // Populate model selects with optgroups
-    populateModelSelect('route-pattern-select', cachedByProvider, cachedModels);
-    populateModelSelect('pg-model', cachedByProvider, cachedModels);
+    // Populate model selects with optgroups (language-only for routes/playground)
+    populateModelSelect('route-pattern-select', cachedByProvider, cachedModels, 'language');
+    populateModelSelect('pg-model', cachedByProvider, cachedModels, 'language');
 
     // Multi-select for API key allowed models
     createMultiSelect('key-models-ms', cachedModels, {
@@ -235,10 +281,17 @@ function populateChainModelSelects() {
 
         if (cachedByProvider.length > 0) {
             for (const pg of cachedByProvider) {
-                if (pg.models.length === 0) continue;
+                // Only show language models in chain selects
+                let models = pg.models;
+                if (pg.models_typed) {
+                    models = pg.models_typed
+                        .filter(m => m.type === 'language')
+                        .map(m => m.name);
+                }
+                if (models.length === 0) continue;
                 const group = document.createElement('optgroup');
                 group.label = pg.display_name;
-                for (const m of pg.models) {
+                for (const m of models) {
                     const opt = document.createElement('option');
                     opt.value = m;
                     opt.textContent = m;
@@ -354,10 +407,17 @@ function addChainStep() {
 function populateSingleChainModel(sel) {
     if (cachedByProvider.length > 0) {
         for (const pg of cachedByProvider) {
-            if (pg.models.length === 0) continue;
+            // Only show language models in chain selects
+            let models = pg.models;
+            if (pg.models_typed) {
+                models = pg.models_typed
+                    .filter(m => m.type === 'language')
+                    .map(m => m.name);
+            }
+            if (models.length === 0) continue;
             const group = document.createElement('optgroup');
             group.label = pg.display_name;
-            for (const m of pg.models) {
+            for (const m of models) {
                 const opt = document.createElement('option');
                 opt.value = m;
                 opt.textContent = m;
@@ -916,10 +976,32 @@ function renderProviderConfigCards() {
         const allModels = providerModels?.all_models || providerModels?.models || [];
         const enabledModels = p.enabled_models || [];
 
+        // Build model type lookup from all_models_typed
+        const modelTypeMap = {};
+        const providerAllTyped = providerModels?.all_models_typed || [];
+        for (const mt of providerAllTyped) {
+            modelTypeMap[mt.name] = mt.type;
+        }
+
+        // Count models by type
+        const typeCounts = {};
+        for (const m of allModels) {
+            const t = modelTypeMap[m] || 'language';
+            typeCounts[t] = (typeCounts[t] || 0) + 1;
+        }
+
         const typeLabel = isLocal ? 'Local' : 'Cloud';
         const enabledBadge = p.is_enabled
             ? '<span class="badge active">Activo</span>'
             : '<span class="badge inactive">Inactivo</span>';
+
+        // Type summary badges
+        const typeSummary = Object.entries(typeCounts)
+            .map(([t, count]) => {
+                const label = MODEL_TYPE_LABELS[t] || t;
+                const color = MODEL_TYPE_COLORS[t] || '#888';
+                return `<span style="font-size:0.7rem;background:${color}20;color:${color};border:1px solid ${color}40;padding:0 4px;border-radius:3px">${count} ${label}</span>`;
+            }).join(' ');
 
         card.innerHTML = `
             <div class="pc-header" onclick="this.parentElement.classList.toggle('open')">
@@ -929,6 +1011,7 @@ function renderProviderConfigCards() {
                 ${!isLocal ? `<span class="pc-key-status ${keyStatusClass}">${keyStatusText}</span>` : ''}
                 ${keyPreview && !isLocal ? `<code style="font-size:0.8rem;color:var(--text-dim)">${keyPreview}</code>` : ''}
                 ${expiryBadge}
+                <span style="display:flex;gap:3px;flex-wrap:wrap">${typeSummary}</span>
                 <span class="pc-chevron">&#9660;</span>
             </div>
             <div class="pc-body">
@@ -977,15 +1060,26 @@ function renderProviderConfigCards() {
                         Modelos activos
                         ${allModels.length > 0 ? `<span class="pc-select-all" onclick="toggleAllModels(${p.id})">seleccionar/deseleccionar todos</span>` : ''}
                     </h4>
+                    ${allModels.length > 0 && Object.keys(typeCounts).length > 1 ? `
+                    <div class="pc-type-filter" style="margin-bottom:0.5rem;display:flex;gap:4px;flex-wrap:wrap">
+                        <button class="btn-small pc-type-btn active" onclick="filterModelGrid(${p.id}, 'all', this)" style="font-size:0.75rem;padding:2px 8px">Todos</button>
+                        ${Object.entries(typeCounts).map(([t, count]) => {
+                            const label = MODEL_TYPE_LABELS[t] || t;
+                            const color = MODEL_TYPE_COLORS[t] || '#888';
+                            return `<button class="btn-small pc-type-btn" onclick="filterModelGrid(${p.id}, '${t}', this)" style="font-size:0.75rem;padding:2px 8px;border-color:${color}">${label} (${count})</button>`;
+                        }).join('')}
+                    </div>` : ''}
                     <div class="pc-model-grid" id="pc-grid-${p.id}">
                         ${allModels.length > 0
                             ? allModels.map(m => {
                                 const checked = enabledModels.length === 0 || enabledModels.includes(m);
                                 const isCustom = (providerModels?.custom_models || []).includes(m);
-                                return `<label class="pc-model-chip ${checked ? 'selected' : ''}" ${isCustom ? 'title="Añadido manualmente"' : ''}>
+                                const mType = modelTypeMap[m] || 'language';
+                                const badge = mType !== 'language' ? modelTypeBadge(mType) : '';
+                                return `<label class="pc-model-chip ${checked ? 'selected' : ''}" data-model-type="${mType}" ${isCustom ? 'title="Añadido manualmente"' : ''}>
                                     <input type="checkbox" value="${m}" ${checked ? 'checked' : ''}
                                            onchange="this.parentElement.classList.toggle('selected', this.checked)" />
-                                    ${isCustom ? '✎ ' : ''}${m}
+                                    ${isCustom ? '✎ ' : ''}${m}${badge}
                                 </label>`;
                             }).join('')
                             : `<span style="color:var(--text-dim);font-size:0.85rem">${hasKey ? 'Haz clic en "Descubrir modelos" para ver los disponibles' : 'Configura la API key primero'}</span>`
@@ -1073,14 +1167,23 @@ async function discoverModels(providerId) {
         const provider = cachedProviders.find(p => p.id === providerId);
         const enabled = provider?.enabled_models || [];
 
-        // Render model chips
+        // Build type map from typed results
+        const discoverTypeMap = {};
+        const modelsTyped = result.models_typed || [];
+        for (const mt of modelsTyped) {
+            discoverTypeMap[mt.name] = mt.type;
+        }
+
+        // Render model chips with type badges
         const grid = document.getElementById(`pc-grid-${providerId}`);
         grid.innerHTML = models.map(m => {
             const checked = enabled.length === 0 || enabled.includes(m);
-            return `<label class="pc-model-chip ${checked ? 'selected' : ''}">
+            const mType = discoverTypeMap[m] || 'language';
+            const badge = mType !== 'language' ? modelTypeBadge(mType) : '';
+            return `<label class="pc-model-chip ${checked ? 'selected' : ''}" data-model-type="${mType}">
                 <input type="checkbox" value="${m}" ${checked ? 'checked' : ''}
                        onchange="this.parentElement.classList.toggle('selected', this.checked)" />
-                ${m}
+                ${m}${badge}
             </label>`;
         }).join('');
 
@@ -1104,6 +1207,25 @@ async function discoverModels(providerId) {
     } catch (e) {
         msg.textContent = 'Error al consultar: ' + e.message;
         msg.className = 'pc-msg error';
+    }
+}
+
+function filterModelGrid(providerId, type, btn) {
+    const grid = document.getElementById(`pc-grid-${providerId}`);
+    const chips = grid.querySelectorAll('.pc-model-chip');
+    chips.forEach(chip => {
+        if (type === 'all' || chip.dataset.modelType === type) {
+            chip.style.display = '';
+        } else {
+            chip.style.display = 'none';
+        }
+    });
+
+    // Update active button
+    const filterContainer = btn.closest('.pc-type-filter');
+    if (filterContainer) {
+        filterContainer.querySelectorAll('.pc-type-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
     }
 }
 
@@ -1219,5 +1341,219 @@ async function saveProviderModels(providerId) {
     setTimeout(() => location.reload(), 1500);
 }
 
+// --- Audio Section ---
+
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecording = false;
+
+async function loadAudioModels() {
+    const data = await api('/admin/api/audio-models');
+    const container = document.getElementById('audio-models-info');
+    if (!container) return;
+
+    const sttModels = (data.stt || []).map(m => `<code>${m.name}</code>`).join(', ');
+    const ttsModels = (data.tts || []).map(m => {
+        const voices = m.voices ? ` (${m.voices.length} voces)` : '';
+        return `<code>${m.name}</code>${voices}`;
+    }).join(', ');
+
+    container.innerHTML = `
+        <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:0.5rem">
+            <div style="font-size:0.85rem">
+                <strong>STT:</strong> ${sttModels}
+                <span class="badge active" style="margin-left:0.5rem">Whisper Local</span>
+            </div>
+            <div style="font-size:0.85rem">
+                <strong>TTS:</strong> ${ttsModels}
+                <span class="badge active" style="margin-left:0.5rem">macOS Say</span>
+            </div>
+        </div>
+    `;
+}
+
+function toggleRecording() {
+    if (isRecording) {
+        stopRecording();
+    } else {
+        startRecording();
+    }
+}
+
+async function startRecording() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+
+        mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) audioChunks.push(e.data);
+        };
+
+        mediaRecorder.onstop = () => {
+            const blob = new Blob(audioChunks, { type: 'audio/webm' });
+            // Create a file from the blob and set it on the file input
+            const file = new File([blob], 'recording.webm', { type: 'audio/webm' });
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            document.getElementById('audio-stt-file').files = dt.files;
+
+            stream.getTracks().forEach(t => t.stop());
+        };
+
+        mediaRecorder.start();
+        isRecording = true;
+        const btn = document.getElementById('audio-record-btn');
+        btn.textContent = 'Detener';
+        btn.style.background = 'var(--danger)';
+        document.getElementById('audio-stt-status').textContent = 'Grabando...';
+        document.getElementById('audio-stt-status').className = 'pc-msg';
+    } catch (e) {
+        document.getElementById('audio-stt-status').textContent = 'Error al acceder al micrófono: ' + e.message;
+        document.getElementById('audio-stt-status').className = 'pc-msg error';
+    }
+}
+
+function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+    }
+    isRecording = false;
+    const btn = document.getElementById('audio-record-btn');
+    btn.textContent = 'Grabar';
+    btn.style.background = '';
+    document.getElementById('audio-stt-status').textContent = 'Grabación lista. Haz clic en Transcribir.';
+    document.getElementById('audio-stt-status').className = 'pc-msg success';
+}
+
+async function transcribeAudio() {
+    const keyInput = document.getElementById('audio-key');
+    const key = keyInput.value.trim();
+    const fileInput = document.getElementById('audio-stt-file');
+    const model = document.getElementById('audio-stt-model').value;
+    const lang = document.getElementById('audio-stt-lang').value;
+    const status = document.getElementById('audio-stt-status');
+    const result = document.getElementById('audio-stt-result');
+
+    if (!key) {
+        status.textContent = 'Ingresa una API key';
+        status.className = 'pc-msg error';
+        return;
+    }
+
+    if (!fileInput.files || fileInput.files.length === 0) {
+        status.textContent = 'Selecciona un archivo de audio o graba uno';
+        status.className = 'pc-msg error';
+        return;
+    }
+
+    status.textContent = 'Transcribiendo...';
+    status.className = 'pc-msg';
+    result.style.display = 'none';
+
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+    formData.append('model', model);
+    formData.append('language', lang);
+    formData.append('response_format', 'json');
+
+    try {
+        const start = performance.now();
+        const res = await fetch('/v1/audio/transcriptions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${key}` },
+            body: formData,
+        });
+        const elapsed = Math.round(performance.now() - start);
+        const data = await res.json();
+
+        if (res.ok) {
+            status.innerHTML = `<span style="color:var(--success)">Transcrito en ${elapsed}ms</span>`;
+            result.textContent = data.text || '(sin texto)';
+            result.style.display = 'block';
+        } else {
+            status.textContent = 'Error: ' + (data.detail || JSON.stringify(data));
+            status.className = 'pc-msg error';
+        }
+    } catch (e) {
+        status.textContent = 'Error: ' + e.message;
+        status.className = 'pc-msg error';
+    }
+}
+
+async function generateSpeech() {
+    const key = document.getElementById('audio-key').value.trim();
+    const text = document.getElementById('audio-tts-text').value.trim();
+    const voice = document.getElementById('audio-tts-voice').value;
+    const speed = parseFloat(document.getElementById('audio-tts-speed').value);
+    const status = document.getElementById('audio-tts-status');
+    const player = document.getElementById('audio-tts-player');
+
+    if (!key) {
+        status.textContent = 'Ingresa una API key (misma que para STT)';
+        status.className = 'pc-msg error';
+        return;
+    }
+
+    if (!text) {
+        status.textContent = 'Escribe un texto para convertir';
+        status.className = 'pc-msg error';
+        return;
+    }
+
+    status.textContent = 'Generando audio...';
+    status.className = 'pc-msg';
+    player.style.display = 'none';
+
+    try {
+        const start = performance.now();
+        const res = await fetch('/v1/audio/speech', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${key}`,
+            },
+            body: JSON.stringify({
+                model: 'tts-local',
+                input: text,
+                voice: voice,
+                speed: speed,
+                response_format: 'wav',
+            }),
+        });
+        const elapsed = Math.round(performance.now() - start);
+
+        if (res.ok) {
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            player.src = url;
+            player.style.display = 'block';
+            player.play();
+            status.innerHTML = `<span style="color:var(--success)">Generado en ${elapsed}ms</span>`;
+        } else {
+            const data = await res.json();
+            status.textContent = 'Error: ' + (data.detail || JSON.stringify(data));
+            status.className = 'pc-msg error';
+        }
+    } catch (e) {
+        status.textContent = 'Error: ' + e.message;
+        status.className = 'pc-msg error';
+    }
+}
+
+// Speed slider label
+document.addEventListener('DOMContentLoaded', () => {
+    const slider = document.getElementById('audio-tts-speed');
+    const label = document.getElementById('audio-tts-speed-label');
+    if (slider && label) {
+        slider.addEventListener('input', () => {
+            label.textContent = parseFloat(slider.value).toFixed(1) + 'x';
+        });
+    }
+});
+
 // --- Boot ---
-document.addEventListener('DOMContentLoaded', initDropdowns);
+document.addEventListener('DOMContentLoaded', () => {
+    initDropdowns();
+    loadAudioModels();
+});
