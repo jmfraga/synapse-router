@@ -3,6 +3,7 @@
 import json
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -10,6 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from synapse.config import get_settings
 from synapse.database import get_db
 from synapse.models import Provider, ApiKey, UsageLog, Route
 from synapse.services.auth import hash_key
@@ -186,6 +188,32 @@ async def delete_route(route_id: int, db: AsyncSession = Depends(get_db)):
 
 
 # --- Metrics ---
+
+@router.get("/api/models")
+async def list_available_models():
+    """Query Ollama for locally available models."""
+    settings = get_settings()
+    models = []
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{settings.ollama_base_url}/api/tags")
+            if resp.status_code == 200:
+                for m in resp.json().get("models", []):
+                    models.append(m["name"])
+    except Exception:
+        pass
+    return {"models": sorted(models)}
+
+
+@router.get("/api/services")
+async def list_services(db: AsyncSession = Depends(get_db)):
+    """Return distinct service names from existing API keys."""
+    result = await db.execute(
+        select(ApiKey.service).where(ApiKey.is_active.is_(True)).distinct()
+    )
+    services = [row[0] for row in result.all()]
+    return {"services": sorted(services)}
+
 
 @router.get("/api/metrics")
 async def get_metrics(

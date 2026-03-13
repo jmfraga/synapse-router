@@ -170,3 +170,52 @@ textarea { width: 100%; font-family: inherit; }
 .key-form { margin-bottom: 1rem; }
 
 label { font-size: 0.9rem; color: var(--text-dim); margin-right: 1rem; }
+
+/* Form layout */
+.form-group { margin-bottom: 0.8rem; }
+.form-group > label { display: block; margin-bottom: 0.3rem; font-weight: 500; }
+.form-row { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end; }
+.form-row .form-group { flex: 1; min-width: 180px; }
+.form-actions { display: flex; gap: 1rem; align-items: center; margin-top: 0.5rem; }
+
+/* Input with toggle link */
+.input-with-toggle { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.input-with-toggle select,
+.input-with-toggle input { flex: 1; min-width: 150px; }
+.toggle-link {
+    font-size: 0.8rem;
+    color: var(--accent);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.toggle-link:hover { color: var(--accent-hover); text-decoration: underline; }
+
+/* Chain builder for routes */
+.chain-step {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.4rem;
+}
+.chain-step select { flex: 1; }
+
+/* Small buttons */
+.btn-small {
+    padding: 0.3rem 0.6rem;
+    font-size: 0.8rem;
+}
+.btn-danger { background: var(--danger); }
+.btn-danger:hover { background: #c0392b; }
+
+/* Select styling */
+select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238b8fa3'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+    padding-right: 2rem;
+}
+select:focus { border-color: var(--accent); outline: none; }
+
+/* Hints */
+.hint { display: block; font-size: 0.75rem; color: var(--text-dim); margin-top: 0.2rem; }

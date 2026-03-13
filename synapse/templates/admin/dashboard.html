@@ -77,11 +77,43 @@
             <h2>Rutas de Ruteo</h2>
             <button onclick="showRouteForm()">+ Nueva Ruta</button>
             <div id="route-form" style="display:none; margin: 1rem 0;">
-                <input id="route-name" placeholder="Nombre" />
-                <input id="route-pattern" placeholder="Patrón de modelo (e.g. gpt-4*)" />
-                <textarea id="route-chain" placeholder='[{"provider":"ollama","model":"llama3"},{"provider":"groq","model":"llama3-70b"}]'></textarea>
-                <input id="route-priority" type="number" value="10" placeholder="Prioridad" />
-                <button onclick="createRoute()">Crear</button>
+                <div class="form-group">
+                    <label for="route-name">Nombre</label>
+                    <input id="route-name" placeholder="e.g. gpt4-fallback" />
+                </div>
+                <div class="form-group">
+                    <label for="route-pattern">Modelo / Patrón</label>
+                    <div class="input-with-toggle">
+                        <select id="route-pattern-select">
+                            <option value="">-- Seleccionar modelo --</option>
+                        </select>
+                        <span class="toggle-link" onclick="toggleRoutePatternMode()">o escribir patrón</span>
+                        <input id="route-pattern-input" style="display:none" placeholder="e.g. gpt-4* (soporta wildcard *)" />
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Cadena de providers (en orden de prioridad)</label>
+                    <div id="route-chain-builder">
+                        <div class="chain-step" data-index="0">
+                            <select class="chain-provider">
+                                <option value="">-- Provider --</option>
+                                {% for p in providers %}
+                                <option value="{{ p.name }}">{{ p.display_name }}</option>
+                                {% endfor %}
+                            </select>
+                            <select class="chain-model">
+                                <option value="">-- Modelo --</option>
+                            </select>
+                            <button type="button" class="btn-small btn-danger" onclick="removeChainStep(this)">✕</button>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-small" onclick="addChainStep()">+ Agregar provider</button>
+                </div>
+                <div class="form-group">
+                    <label for="route-priority">Prioridad</label>
+                    <input id="route-priority" type="number" value="10" min="1" max="100" style="width:80px" />
+                </div>
+                <button onclick="createRoute()">Crear Ruta</button>
             </div>
             <table>
                 <thead>
@@ -119,10 +151,32 @@
         <section id="keys">
             <h2>API Keys</h2>
             <div class="key-form">
-                <input id="key-name" placeholder="Nombre (e.g. OpenClaw Prod)" />
-                <input id="key-service" placeholder="Servicio (e.g. openclaw)" />
-                <input id="key-models" placeholder="Modelos permitidos (* = todos)" value="*" />
-                <button onclick="createKey()">Generar Key</button>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="key-name">Nombre</label>
+                        <input id="key-name" placeholder="e.g. OpenClaw Prod" />
+                    </div>
+                    <div class="form-group">
+                        <label for="key-service">Servicio</label>
+                        <div class="input-with-toggle">
+                            <select id="key-service-select">
+                                <option value="">-- Seleccionar --</option>
+                            </select>
+                            <span class="toggle-link" onclick="toggleServiceMode()">o crear nuevo</span>
+                            <input id="key-service-input" style="display:none" placeholder="Nombre del servicio" />
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="key-models">Modelos permitidos</label>
+                        <select id="key-models">
+                            <option value="*" selected>* (todos)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>&nbsp;</label>
+                        <button onclick="createKey()">Generar Key</button>
+                    </div>
+                </div>
             </div>
             <div id="new-key-display" style="display:none;" class="key-alert">
                 <strong>Nueva key generada (copia ahora, no se mostrará de nuevo):</strong>
@@ -177,11 +231,27 @@
         <section id="playground">
             <h2>Playground</h2>
             <div class="playground-form">
-                <input id="pg-key" placeholder="API Key (syn-...)" />
-                <input id="pg-model" placeholder="Modelo (e.g. llama3)" />
-                <textarea id="pg-message" placeholder="Escribe tu mensaje..." rows="3"></textarea>
-                <label><input type="checkbox" id="pg-stream" /> Streaming</label>
-                <button onclick="sendPlayground()">Enviar</button>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="pg-key-manual">API Key</label>
+                        <input id="pg-key-manual" placeholder="Pegar key (syn-...)" />
+                        <span class="hint">Keys activas: {% for k in api_keys %}{% if k.is_active %}{{ k.name }} ({{ k.key_prefix }}...) {% endif %}{% endfor %}</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="pg-model">Modelo</label>
+                        <select id="pg-model">
+                            <option value="">-- Seleccionar modelo --</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="pg-message">Mensaje</label>
+                    <textarea id="pg-message" placeholder="Escribe tu mensaje..." rows="3"></textarea>
+                </div>
+                <div class="form-actions">
+                    <label><input type="checkbox" id="pg-stream" /> Streaming</label>
+                    <button onclick="sendPlayground()">Enviar</button>
+                </div>
             </div>
             <pre id="pg-output"></pre>
         </section>

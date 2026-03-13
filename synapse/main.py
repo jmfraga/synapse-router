@@ -51,12 +51,13 @@ async def health():
 
 
 def main():
+    import os
     settings = get_settings()
     uvicorn.run(
         "synapse.main:app",
         host=settings.host,
         port=settings.port,
-        reload=True,
+        reload=os.environ.get("SYNAPSE_DEV", "") == "1",
     )
 
 
