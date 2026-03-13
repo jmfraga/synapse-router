@@ -1,6 +1,9 @@
 """Admin API endpoints for managing providers, routes, and API keys."""
 
+import asyncio
 import json
+import logging
+import os
 from typing import Optional
 
 import httpx
@@ -15,6 +18,8 @@ from synapse.config import get_settings
 from synapse.database import get_db
 from synapse.models import Provider, ApiKey, UsageLog, Route
 from synapse.services.auth import hash_key
+
+logger = logging.getLogger("synapse.admin")
 
 router = APIRouter(prefix="/admin")
 templates = Jinja2Templates(directory="synapse/templates")
@@ -190,19 +195,100 @@ async def delete_route(route_id: int, db: AsyncSession = Depends(get_db)):
 # --- Metrics ---
 
 @router.get("/api/models")
-async def list_available_models():
-    """Query Ollama for locally available models."""
+async def list_available_models(db: AsyncSession = Depends(get_db)):
+    """Query all enabled providers for their available models."""
     settings = get_settings()
-    models = []
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{settings.ollama_base_url}/api/tags")
-            if resp.status_code == 200:
-                for m in resp.json().get("models", []):
-                    models.append(m["name"])
-    except Exception:
-        pass
-    return {"models": sorted(models)}
+    result = await db.execute(
+        select(Provider).where(Provider.is_enabled.is_(True)).order_by(Provider.priority)
+    )
+    providers = result.scalars().all()
+
+    # Known models for providers without a model list API
+    KNOWN_MODELS = {
+        "anthropic": [
+            "claude-opus-4-20250514", "claude-sonnet-4-20250514",
+            "claude-haiku-4-5-20251001", "claude-3-5-sonnet-20241022",
+        ],
+        "perplexity": [
+            "sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-reasoning",
+        ],
+    }
+
+    provider_key_map = {
+        "groq": settings.groq_api_key,
+        "nvidia": settings.nvidia_api_key,
+        "openai": settings.openai_api_key,
+        "anthropic": settings.anthropic_api_key,
+        "gemini": settings.gemini_api_key,
+        "perplexity": settings.perplexity_api_key,
+    }
+
+    async def fetch_provider_models(provider: Provider) -> dict:
+        """Fetch models for a single provider."""
+        name = provider.name
+        key = provider_key_map.get(name, "")
+        configured = bool(key) or provider.is_local
+        models = []
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                if name == "ollama":
+                    resp = await client.get(f"{settings.ollama_base_url}/api/tags")
+                    if resp.status_code == 200:
+                        models = [m["name"] for m in resp.json().get("models", [])]
+
+                elif name in KNOWN_MODELS:
+                    if configured:
+                        models = KNOWN_MODELS[name]
+
+                elif key and name in ("groq", "nvidia", "openai"):
+                    # These support the OpenAI-compatible /v1/models endpoint
+                    base = provider.base_url or {
+                        "groq": "https://api.groq.com/openai/v1",
+                        "openai": "https://api.openai.com/v1",
+                    }.get(name, "")
+                    if base:
+                        url = f"{base.rstrip('/')}/models"
+                        resp = await client.get(
+                            url, headers={"Authorization": f"Bearer {key}"}
+                        )
+                        if resp.status_code == 200:
+                            for m in resp.json().get("data", []):
+                                models.append(m["id"])
+
+                elif key and name == "gemini":
+                    resp = await client.get(
+                        f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
+                    )
+                    if resp.status_code == 200:
+                        for m in resp.json().get("models", []):
+                            # name format: "models/gemini-1.5-flash"
+                            model_id = m.get("name", "").replace("models/", "")
+                            if model_id:
+                                models.append(model_id)
+        except Exception as e:
+            logger.debug(f"Could not fetch models for {name}: {e}")
+
+        return {
+            "provider": name,
+            "display_name": provider.display_name,
+            "configured": configured,
+            "models": sorted(models),
+        }
+
+    # Fetch all provider models concurrently
+    tasks = [fetch_provider_models(p) for p in providers]
+    provider_results = await asyncio.gather(*tasks)
+
+    # Also build flat list for backwards compatibility
+    all_models = []
+    for pr in provider_results:
+        all_models.extend(pr["models"])
+
+    return {
+        "models": sorted(set(all_models)),
+        "by_provider": provider_results,
+    }
 
 
 @router.get("/api/services")

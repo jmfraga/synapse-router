@@ -1,8 +1,9 @@
 const API = '';
 
 // --- Cached data ---
-let cachedModels = [];
-let cachedProviders = [];
+let cachedModels = [];          // flat list of all model names
+let cachedByProvider = [];      // [{provider, display_name, configured, models}]
+let cachedProviders = [];       // from /api/providers
 
 // --- Generic API helper ---
 async function api(path, method = 'GET', body = null) {
@@ -10,6 +11,158 @@ async function api(path, method = 'GET', body = null) {
     if (body) opts.body = JSON.stringify(body);
     const res = await fetch(API + path, opts);
     return res.json();
+}
+
+// --- Multi-select checkbox component ---
+function createMultiSelect(containerId, options, opts = {}) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const allValue = opts.allValue || '*';
+    const allLabel = opts.allLabel || '* (todos)';
+    const grouped = opts.grouped || false;
+
+    container.classList.add('multi-select');
+    container.innerHTML = '';
+
+    // Display area
+    const display = document.createElement('div');
+    display.className = 'ms-display';
+    display.textContent = allLabel;
+    container.appendChild(display);
+
+    // Dropdown
+    const dropdown = document.createElement('div');
+    dropdown.className = 'ms-dropdown';
+
+    // "All" option
+    const allItem = document.createElement('label');
+    allItem.className = 'ms-item';
+    allItem.innerHTML = `<input type="checkbox" value="${allValue}" checked /> ${allLabel}`;
+    dropdown.appendChild(allItem);
+
+    const allCheckbox = allItem.querySelector('input');
+
+    if (grouped && opts.providerData) {
+        for (const pg of opts.providerData) {
+            if (pg.models.length === 0) continue;
+            const header = document.createElement('div');
+            header.className = 'ms-group-header';
+            const status = pg.configured ? '' : ' (sin key)';
+            header.textContent = `${pg.display_name}${status}`;
+            dropdown.appendChild(header);
+
+            for (const m of pg.models) {
+                const item = document.createElement('label');
+                item.className = 'ms-item';
+                item.innerHTML = `<input type="checkbox" value="${m}" /> ${m}`;
+                if (!pg.configured) item.classList.add('ms-disabled');
+                dropdown.appendChild(item);
+            }
+        }
+    } else {
+        for (const m of options) {
+            const item = document.createElement('label');
+            item.className = 'ms-item';
+            item.innerHTML = `<input type="checkbox" value="${m}" /> ${m}`;
+            dropdown.appendChild(item);
+        }
+    }
+
+    container.appendChild(dropdown);
+
+    // Toggle dropdown
+    display.addEventListener('click', (e) => {
+        e.stopPropagation();
+        container.classList.toggle('open');
+    });
+
+    // Handle "all" checkbox
+    allCheckbox.addEventListener('change', () => {
+        if (allCheckbox.checked) {
+            dropdown.querySelectorAll('input:not([value="' + allValue + '"])').forEach(cb => {
+                cb.checked = false;
+            });
+        }
+        updateDisplay();
+    });
+
+    // Handle individual checkboxes
+    dropdown.addEventListener('change', (e) => {
+        if (e.target === allCheckbox) return;
+        if (e.target.type !== 'checkbox') return;
+
+        if (e.target.checked) {
+            allCheckbox.checked = false;
+        }
+
+        // If nothing selected, re-check all
+        const anyChecked = dropdown.querySelectorAll('input:checked:not([value="' + allValue + '"])').length > 0;
+        if (!anyChecked) allCheckbox.checked = true;
+
+        updateDisplay();
+    });
+
+    function updateDisplay() {
+        if (allCheckbox.checked) {
+            display.textContent = allLabel;
+            return;
+        }
+        const selected = [];
+        dropdown.querySelectorAll('input:checked:not([value="' + allValue + '"])').forEach(cb => {
+            selected.push(cb.value);
+        });
+        display.textContent = selected.length > 2
+            ? `${selected.length} modelos seleccionados`
+            : selected.join(', ') || allLabel;
+    }
+
+    // Close on outside click
+    document.addEventListener('click', () => container.classList.remove('open'));
+    container.addEventListener('click', (e) => e.stopPropagation());
+
+    // Method to get value
+    container.getValue = () => {
+        if (allCheckbox.checked) return allValue;
+        const selected = [];
+        dropdown.querySelectorAll('input:checked:not([value="' + allValue + '"])').forEach(cb => {
+            selected.push(cb.value);
+        });
+        return selected.join(',') || allValue;
+    };
+}
+
+// --- Populate selects with optgroups by provider ---
+function populateModelSelect(selectId, byProvider, flat) {
+    const el = document.getElementById(selectId);
+    if (!el) return;
+
+    // Keep the first default option
+    while (el.options.length > 1) el.remove(1);
+
+    if (byProvider && byProvider.length > 0) {
+        for (const pg of byProvider) {
+            if (pg.models.length === 0) continue;
+            const group = document.createElement('optgroup');
+            const status = pg.configured ? '' : ' (sin key)';
+            group.label = `${pg.display_name}${status}`;
+            for (const m of pg.models) {
+                const opt = document.createElement('option');
+                opt.value = m;
+                opt.textContent = m;
+                if (!pg.configured) opt.disabled = true;
+                group.appendChild(opt);
+            }
+            el.appendChild(group);
+        }
+    } else {
+        for (const m of flat) {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.textContent = m;
+            el.appendChild(opt);
+        }
+    }
 }
 
 // --- Init: populate all dropdowns on page load ---
@@ -21,31 +174,20 @@ async function initDropdowns() {
     ]);
 
     cachedModels = modelsData.models || [];
+    cachedByProvider = modelsData.by_provider || [];
     cachedProviders = providersData || [];
 
-    // Populate model selects
-    const modelSelects = ['route-pattern-select', 'pg-model', 'key-models'];
-    for (const id of modelSelects) {
-        const el = document.getElementById(id);
-        if (!el) continue;
+    // Populate model selects with optgroups
+    populateModelSelect('route-pattern-select', cachedByProvider, cachedModels);
+    populateModelSelect('pg-model', cachedByProvider, cachedModels);
 
-        if (id === 'key-models') {
-            // key-models: keep "* (todos)" as first, add individual models
-            for (const m of cachedModels) {
-                const opt = document.createElement('option');
-                opt.value = m;
-                opt.textContent = m;
-                el.appendChild(opt);
-            }
-        } else {
-            for (const m of cachedModels) {
-                const opt = document.createElement('option');
-                opt.value = m;
-                opt.textContent = m;
-                el.appendChild(opt);
-            }
-        }
-    }
+    // Multi-select for API key allowed models
+    createMultiSelect('key-models-ms', cachedModels, {
+        allValue: '*',
+        allLabel: '* (todos)',
+        grouped: true,
+        providerData: cachedByProvider,
+    });
 
     // Populate service select
     const serviceSelect = document.getElementById('key-service-select');
@@ -66,14 +208,30 @@ async function initDropdowns() {
 function populateChainModelSelects() {
     document.querySelectorAll('.chain-model').forEach(sel => {
         const current = sel.value;
-        // Keep first option, remove rest
         while (sel.options.length > 1) sel.remove(1);
-        for (const m of cachedModels) {
-            const opt = document.createElement('option');
-            opt.value = m;
-            opt.textContent = m;
-            sel.appendChild(opt);
+
+        if (cachedByProvider.length > 0) {
+            for (const pg of cachedByProvider) {
+                if (pg.models.length === 0) continue;
+                const group = document.createElement('optgroup');
+                group.label = pg.display_name;
+                for (const m of pg.models) {
+                    const opt = document.createElement('option');
+                    opt.value = m;
+                    opt.textContent = m;
+                    group.appendChild(opt);
+                }
+                sel.appendChild(group);
+            }
+        } else {
+            for (const m of cachedModels) {
+                const opt = document.createElement('option');
+                opt.value = m;
+                opt.textContent = m;
+                sel.appendChild(opt);
+            }
         }
+
         if (current) sel.value = current;
     });
 }
@@ -114,9 +272,6 @@ function addChainStep() {
     const providerOptions = cachedProviders
         .map(p => `<option value="${p.name}">${p.display_name}</option>`)
         .join('');
-    const modelOptions = cachedModels
-        .map(m => `<option value="${m}">${m}</option>`)
-        .join('');
 
     const div = document.createElement('div');
     div.className = 'chain-step';
@@ -128,11 +283,31 @@ function addChainStep() {
         </select>
         <select class="chain-model">
             <option value="">-- Modelo --</option>
-            ${modelOptions}
         </select>
         <button type="button" class="btn-small btn-danger" onclick="removeChainStep(this)">✕</button>
     `;
     builder.appendChild(div);
+
+    // Populate the new chain-model select
+    const modelSel = div.querySelector('.chain-model');
+    populateSingleChainModel(modelSel);
+}
+
+function populateSingleChainModel(sel) {
+    if (cachedByProvider.length > 0) {
+        for (const pg of cachedByProvider) {
+            if (pg.models.length === 0) continue;
+            const group = document.createElement('optgroup');
+            group.label = pg.display_name;
+            for (const m of pg.models) {
+                const opt = document.createElement('option');
+                opt.value = m;
+                opt.textContent = m;
+                group.appendChild(opt);
+            }
+            sel.appendChild(group);
+        }
+    }
 }
 
 function removeChainStep(btn) {
@@ -145,7 +320,6 @@ function removeChainStep(btn) {
 async function createRoute() {
     const name = document.getElementById('route-name').value.trim();
 
-    // Get pattern from select or input
     const sel = document.getElementById('route-pattern-select');
     const inp = document.getElementById('route-pattern-input');
     const pattern = sel.style.display === 'none' ? inp.value.trim() : sel.value;
@@ -155,7 +329,6 @@ async function createRoute() {
         return;
     }
 
-    // Build chain from visual builder
     const chain = [];
     document.querySelectorAll('.chain-step').forEach(step => {
         const provider = step.querySelector('.chain-provider').value;
@@ -205,12 +378,12 @@ function toggleServiceMode() {
 async function createKey() {
     const name = document.getElementById('key-name').value.trim();
 
-    // Get service from select or input
     const sel = document.getElementById('key-service-select');
     const inp = document.getElementById('key-service-input');
     const service = sel.style.display === 'none' ? inp.value.trim() : sel.value;
 
-    const models = document.getElementById('key-models').value;
+    const msContainer = document.getElementById('key-models-ms');
+    const models = msContainer?.getValue ? msContainer.getValue() : '*';
 
     if (!name || !service) {
         alert('Nombre y servicio son requeridos');
@@ -254,7 +427,6 @@ async function loadMetrics() {
 // --- Playground ---
 async function sendPlayground() {
     const key = document.getElementById('pg-key-manual').value.trim();
-
     const model = document.getElementById('pg-model').value;
     const message = document.getElementById('pg-message').value.trim();
     const stream = document.getElementById('pg-stream').checked;

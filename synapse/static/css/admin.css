@@ -219,3 +219,66 @@ select:focus { border-color: var(--accent); outline: none; }
 
 /* Hints */
 .hint { display: block; font-size: 0.75rem; color: var(--text-dim); margin-top: 0.2rem; }
+
+/* Multi-select checkbox component */
+.multi-select { position: relative; min-width: 180px; }
+.ms-display {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 0.5rem 2rem 0.5rem 0.8rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238b8fa3'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+}
+.multi-select.open .ms-display { border-color: var(--accent); }
+.ms-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    min-width: 250px;
+    max-height: 280px;
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: 0 0 6px 6px;
+    z-index: 100;
+    padding: 0.3rem 0;
+}
+.multi-select.open .ms-dropdown { display: block; }
+.ms-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.8rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text);
+    margin: 0;
+}
+.ms-item:hover { background: var(--border); }
+.ms-item input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
+.ms-item.ms-disabled { opacity: 0.4; pointer-events: none; }
+.ms-group-header {
+    padding: 0.4rem 0.8rem 0.2rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-top: 1px solid var(--border);
+    margin-top: 0.2rem;
+}
+.ms-group-header:first-child { border-top: none; margin-top: 0; }
+
+/* Optgroup styling in selects */
+optgroup { color: var(--accent); font-style: normal; font-weight: 600; font-size: 0.85rem; }
+option { color: var(--text); font-weight: 400; }
