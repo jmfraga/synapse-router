@@ -1,6 +1,14 @@
-# Synapse Router
+<p align="center">
+  <img src="docs/Synapse Router small.png" alt="Synapse Router" width="300">
+</p>
 
-Router inteligente de LLMs con ruteo por capas, clasificación de modelos, endpoints de audio (STT/TTS), panel de administración y métricas.
+<h1 align="center">Synapse Router</h1>
+
+<p align="center">
+  Router inteligente de LLMs con ruteo por capas, clasificación de modelos, endpoints de audio (STT/TTS), panel de administración y métricas.
+</p>
+
+---
 
 ## Arquitectura
 
@@ -13,7 +21,7 @@ Router inteligente de LLMs con ruteo por capas, clasificación de modelos, endpo
     │    Synapse Router      │
     │  (FastAPI + SQLite)    │
     │                        │
-    │  /v1/chat/completions  │  ← LLMs (387+ modelos)
+    │  /v1/chat/completions  │  ← LLMs (391+ modelos)
     │  /v1/audio/transcriptions │  ← STT (Whisper local)
     │  /v1/audio/speech      │  ← TTS (macOS / cloud)
     │  /admin/               │  ← Panel de administración
@@ -32,7 +40,7 @@ Router inteligente de LLMs con ruteo por capas, clasificación de modelos, endpo
 
 ### LLM Routing
 - **API compatible con OpenAI** — drop-in replacement para `/v1/chat/completions`
-- **7 providers**: Ollama (local), Groq, NVIDIA NIM, Anthropic, OpenAI, Gemini, Perplexity — **387+ modelos**
+- **7 providers**: Ollama (local), Groq, NVIDIA NIM, Anthropic, OpenAI, Gemini, Perplexity — **391+ modelos**
 - **Ruteo por capas** con fallback automático por prioridad de provider
 - **Smart Routes** — ruteo por intención con clasificador LLM local (llama3.1:8b)
 - **Per-key routing** — API keys vinculadas a Smart Routes para servicios especializados
@@ -55,13 +63,24 @@ Router inteligente de LLMs con ruteo por capas, clasificación de modelos, endpo
   - Velocidad configurable (0.5x – 2.0x)
 - Sección dedicada en admin con grabación desde micrófono y reproducción
 
+### Arena (v0.3.0)
+- **Comparación side-by-side** de modelos de todos los providers con streaming
+- **22 presets** en 6 categorías (simple, medicine, coding, tool_use, reasoning, spanish)
+- **Métricas en tiempo real**: TTFT, tokens/s, tokens totales, tiempo, costo
+- **Rating 1-5** por resultado con persistencia en DB
+- **Scorecard**: ranking por modelo y categoría con gradiente de color
+- **Recomendaciones**: compara scorecard vs asignación actual de Smart Routes
+- **Apply**: actualiza Smart Route con modelo recomendado en un click
+
 ### Panel de Administración
+- **Dashboard overview** con estado del sistema, actividad del día y top modelos
+- **Navegación SPA** — secciones independientes con lazy-loading
 - **Gestión de providers**: crear, eliminar, activar/desactivar, prioridad, API keys con expiración y alertas de rotación
 - **Descubrimiento de modelos**: consulta automática a APIs de providers, selección de modelos activos, modelos custom manuales
 - **Test de conexión** por provider y modelo
 - **Gestión de rutas**: CRUD completo para rutas explícitas y Smart Routes
 - **API keys por servicio**: generación, revocación, modelos permitidos, asignación de Smart Route
-- **Métricas**: requests, costos, latencia, por provider
+- **Analytics**: requests, costos, latencia, por provider/modelo/servicio con timeline
 - **Playground**: probar chat completions directo desde el panel
 - **Audio**: transcribir archivos o grabar desde el micrófono, generar y reproducir TTS
 
