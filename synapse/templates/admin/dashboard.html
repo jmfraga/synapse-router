@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Synapse Router — Admin</title>
+    <link rel="stylesheet" href="/static/css/admin.css">
+</head>
+<body>
+    <header>
+        <h1>⚡ Synapse Router</h1>
+        <nav>
+            <a href="#providers">Providers</a>
+            <a href="#routes">Rutas</a>
+            <a href="#keys">API Keys</a>
+            <a href="#metrics">Métricas</a>
+            <a href="#playground">Playground</a>
+        </nav>
+    </header>
+
+    <main>
+        <!-- Stats Overview -->
+        <section class="stats-bar">
+            <div class="stat">
+                <span class="stat-value">{{ stats.total_requests }}</span>
+                <span class="stat-label">Requests totales</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value">${{ stats.total_cost }}</span>
+                <span class="stat-label">Costo total</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value">{{ stats.avg_latency }}ms</span>
+                <span class="stat-label">Latencia promedio</span>
+            </div>
+        </section>
+
+        <!-- Providers -->
+        <section id="providers">
+            <h2>Providers</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Provider</th>
+                        <th>Prioridad</th>
+                        <th>Tipo</th>
+                        <th>Latencia</th>
+                        <th>Estado</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for p in providers %}
+                    <tr data-id="{{ p.id }}">
+                        <td><strong>{{ p.display_name }}</strong></td>
+                        <td>{{ p.priority }}</td>
+                        <td>{{ "Local" if p.is_local else "Cloud" }}</td>
+                        <td>{{ p.avg_latency_ms }}ms</td>
+                        <td>
+                            <span class="badge {{ 'active' if p.is_enabled else 'inactive' }}">
+                                {{ "Activo" if p.is_enabled else "Inactivo" }}
+                            </span>
+                        </td>
+                        <td>
+                            <button onclick="toggleProvider({{ p.id }}, {{ 'false' if p.is_enabled else 'true' }})">
+                                {{ "Desactivar" if p.is_enabled else "Activar" }}
+                            </button>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        <!-- Routes -->
+        <section id="routes">
+            <h2>Rutas de Ruteo</h2>
+            <button onclick="showRouteForm()">+ Nueva Ruta</button>
+            <div id="route-form" style="display:none; margin: 1rem 0;">
+                <input id="route-name" placeholder="Nombre" />
+                <input id="route-pattern" placeholder="Patrón de modelo (e.g. gpt-4*)" />
+                <textarea id="route-chain" placeholder='[{"provider":"ollama","model":"llama3"},{"provider":"groq","model":"llama3-70b"}]'></textarea>
+                <input id="route-priority" type="number" value="10" placeholder="Prioridad" />
+                <button onclick="createRoute()">Crear</button>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nombre</th>
+                        <th>Patrón</th>
+                        <th>Cadena de providers</th>
+                        <th>Prioridad</th>
+                        <th>Estado</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="routes-body">
+                {% for r in routes %}
+                    <tr>
+                        <td>{{ r.name }}</td>
+                        <td><code>{{ r.model_pattern }}</code></td>
+                        <td><code>{{ r.provider_chain }}</code></td>
+                        <td>{{ r.priority }}</td>
+                        <td>
+                            <span class="badge {{ 'active' if r.is_enabled else 'inactive' }}">
+                                {{ "Activo" if r.is_enabled else "Inactivo" }}
+                            </span>
+                        </td>
+                        <td>
+                            <button onclick="deleteRoute({{ r.id }})">Eliminar</button>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        <!-- API Keys -->
+        <section id="keys">
+            <h2>API Keys</h2>
+            <div class="key-form">
+                <input id="key-name" placeholder="Nombre (e.g. OpenClaw Prod)" />
+                <input id="key-service" placeholder="Servicio (e.g. openclaw)" />
+                <input id="key-models" placeholder="Modelos permitidos (* = todos)" value="*" />
+                <button onclick="createKey()">Generar Key</button>
+            </div>
+            <div id="new-key-display" style="display:none;" class="key-alert">
+                <strong>Nueva key generada (copia ahora, no se mostrará de nuevo):</strong>
+                <code id="new-key-value"></code>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nombre</th>
+                        <th>Servicio</th>
+                        <th>Prefijo</th>
+                        <th>Modelos</th>
+                        <th>RPM</th>
+                        <th>Estado</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for k in api_keys %}
+                    <tr>
+                        <td>{{ k.name }}</td>
+                        <td>{{ k.service }}</td>
+                        <td><code>{{ k.key_prefix }}...</code></td>
+                        <td>{{ k.allowed_models }}</td>
+                        <td>{{ k.rate_limit_rpm }}</td>
+                        <td>
+                            <span class="badge {{ 'active' if k.is_active else 'inactive' }}">
+                                {{ "Activa" if k.is_active else "Revocada" }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if k.is_active %}
+                            <button onclick="revokeKey({{ k.id }})">Revocar</button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        <!-- Metrics -->
+        <section id="metrics">
+            <h2>Métricas</h2>
+            <div id="metrics-content">
+                <button onclick="loadMetrics()">Cargar métricas</button>
+                <div id="metrics-data"></div>
+            </div>
+        </section>
+
+        <!-- Playground -->
+        <section id="playground">
+            <h2>Playground</h2>
+            <div class="playground-form">
+                <input id="pg-key" placeholder="API Key (syn-...)" />
+                <input id="pg-model" placeholder="Modelo (e.g. llama3)" />
+                <textarea id="pg-message" placeholder="Escribe tu mensaje..." rows="3"></textarea>
+                <label><input type="checkbox" id="pg-stream" /> Streaming</label>
+                <button onclick="sendPlayground()">Enviar</button>
+            </div>
+            <pre id="pg-output"></pre>
+        </section>
+    </main>
+
+    <script src="/static/js/admin.js"></script>
+</body>
+</html>
