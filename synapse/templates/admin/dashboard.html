@@ -266,6 +266,16 @@
                         <div id="key-models-ms"></div>
                     </div>
                     <div class="form-group">
+                        <label for="key-smart-route">Smart Route</label>
+                        <select id="key-smart-route">
+                            <option value="">(ninguno — ruteo global)</option>
+                            {% for sr in smart_routes %}
+                            <option value="{{ sr.id }}">{{ sr.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <span class="hint">Perfil de ruteo inteligente para esta key</span>
+                    </div>
+                    <div class="form-group">
                         <label>&nbsp;</label>
                         <button onclick="createKey()">Generar Key</button>
                     </div>
@@ -282,6 +292,7 @@
                         <th>Servicio</th>
                         <th>Prefijo</th>
                         <th>Modelos</th>
+                        <th>Smart Route</th>
                         <th>RPM</th>
                         <th>Estado</th>
                         <th>Acciones</th>
@@ -294,6 +305,7 @@
                         <td>{{ k.service }}</td>
                         <td><code>{{ k.key_prefix }}...</code></td>
                         <td>{{ k.allowed_models }}</td>
+                        <td>{% if k.smart_route_id %}<code>{{ k.smart_route_id }}</code>{% else %}—{% endif %}</td>
                         <td>{{ k.rate_limit_rpm }}</td>
                         <td>
                             <span class="badge {{ 'active' if k.is_active else 'inactive' }}">

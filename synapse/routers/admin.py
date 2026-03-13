@@ -115,6 +115,7 @@ class CreateKeyRequest(BaseModel):
     service: str
     allowed_models: str = "*"
     rate_limit_rpm: int = 60
+    smart_route_id: Optional[int] = None
 
 
 @router.post("/api/keys")
@@ -127,6 +128,7 @@ async def create_api_key(data: CreateKeyRequest, db: AsyncSession = Depends(get_
         service=data.service,
         allowed_models=data.allowed_models,
         rate_limit_rpm=data.rate_limit_rpm,
+        smart_route_id=data.smart_route_id,
     )
     db.add(key)
     await db.commit()
@@ -138,11 +140,23 @@ async def create_api_key(data: CreateKeyRequest, db: AsyncSession = Depends(get_
 async def list_api_keys(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(ApiKey))
     keys = result.scalars().all()
+
+    # Fetch smart route names for display
+    sr_names = {}
+    sr_ids = {k.smart_route_id for k in keys if k.smart_route_id}
+    if sr_ids:
+        sr_result = await db.execute(
+            select(SmartRoute.id, SmartRoute.name).where(SmartRoute.id.in_(sr_ids))
+        )
+        sr_names = {row[0]: row[1] for row in sr_result.all()}
+
     return [
         {
             "id": k.id, "name": k.name, "key_prefix": k.key_prefix,
             "service": k.service, "is_active": k.is_active,
             "allowed_models": k.allowed_models, "rate_limit_rpm": k.rate_limit_rpm,
+            "smart_route_id": k.smart_route_id,
+            "smart_route_name": sr_names.get(k.smart_route_id, ""),
         }
         for k in keys
     ]

@@ -381,14 +381,18 @@ async function createKey() {
     const msContainer = document.getElementById('key-models-ms');
     const models = msContainer?.getValue ? msContainer.getValue() : '*';
 
+    const smartRouteVal = document.getElementById('key-smart-route')?.value;
+    const smartRouteId = smartRouteVal ? parseInt(smartRouteVal) || null : null;
+
     if (!name || !service) {
         alert('Nombre y servicio son requeridos');
         return;
     }
 
-    const result = await api('/admin/api/keys', 'POST', {
-        name, service, allowed_models: models
-    });
+    const body = { name, service, allowed_models: models };
+    if (smartRouteId) body.smart_route_id = smartRouteId;
+
+    const result = await api('/admin/api/keys', 'POST', body);
 
     document.getElementById('new-key-value').textContent = result.key;
     document.getElementById('new-key-display').style.display = 'block';

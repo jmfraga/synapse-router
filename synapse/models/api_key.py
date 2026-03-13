@@ -1,6 +1,7 @@
 import datetime
 import secrets
-from sqlalchemy import String, Boolean, DateTime, Text
+from typing import Optional
+from sqlalchemy import String, Boolean, Integer, DateTime, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from synapse.database import Base
@@ -17,6 +18,9 @@ class ApiKey(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     allowed_models: Mapped[str] = mapped_column(Text, default="*")  # comma-separated or *
     rate_limit_rpm: Mapped[int] = mapped_column(default=60)  # requests per minute
+    smart_route_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("smart_routes.id"), nullable=True, default=None
+    )  # assigned smart route profile (None = use global)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=datetime.datetime.utcnow
     )

@@ -9,7 +9,7 @@ import litellm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from synapse.models import Route, Provider, UsageLog, SmartRoute
+from synapse.models import Route, Provider, UsageLog, SmartRoute, ApiKey
 from synapse.services.classifier import classify_intent
 
 logger = logging.getLogger("synapse.router")
@@ -24,14 +24,16 @@ class RouterEngine:
         self._provider_latencies: dict[str, float] = {}
 
     async def resolve_route(
-        self, model: str, db: AsyncSession, messages: list[dict] | None = None,
+        self, model: str, db: AsyncSession,
+        messages: list[dict] | None = None,
+        api_key_id: int = 0,
     ) -> list[dict]:
         """Find the best provider chain for a given model request.
 
         Returns ordered list of {provider, model, base_url, api_key} dicts.
         """
         # 0. Check smart routes (intent-based routing)
-        smart = await self._check_smart_route(model, messages, db)
+        smart = await self._check_smart_route(model, messages, db, api_key_id)
         if smart is not None:
             return smart
 
@@ -62,7 +64,7 @@ class RouterEngine:
         **kwargs,
     ):
         """Route a completion request through the provider chain."""
-        chain = await self.resolve_route(model, db, messages=messages)
+        chain = await self.resolve_route(model, db, messages=messages, api_key_id=api_key_id)
 
         if not chain:
             raise ValueError(f"No available provider for model: {model}")
@@ -131,14 +133,34 @@ class RouterEngine:
 
     async def _check_smart_route(
         self, model: str, messages: list[dict] | None, db: AsyncSession,
+        api_key_id: int = 0,
     ) -> list[dict] | None:
-        """Check if the model name matches a smart route trigger."""
-        stmt = select(SmartRoute).where(
-            SmartRoute.trigger_model == model,
-            SmartRoute.is_enabled.is_(True),
-        )
-        result = await db.execute(stmt)
-        smart_route = result.scalar_one_or_none()
+        """Check if the request should use a smart route.
+
+        Priority: key-specific smart route > global trigger match.
+        """
+        smart_route = None
+
+        # 1. Check if this API key has a dedicated smart route
+        if api_key_id:
+            key = await db.get(ApiKey, api_key_id)
+            if key and key.smart_route_id:
+                sr = await db.get(SmartRoute, key.smart_route_id)
+                if sr and sr.is_enabled:
+                    smart_route = sr
+                    logger.info(
+                        f"Using key-specific smart route '{sr.name}' "
+                        f"for key '{key.name}'"
+                    )
+
+        # 2. Fall back to global trigger match
+        if not smart_route:
+            stmt = select(SmartRoute).where(
+                SmartRoute.trigger_model == model,
+                SmartRoute.is_enabled.is_(True),
+            )
+            result = await db.execute(stmt)
+            smart_route = result.scalar_one_or_none()
 
         if not smart_route:
             return None
