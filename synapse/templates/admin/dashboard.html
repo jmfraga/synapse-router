@@ -157,14 +157,12 @@
                         <input id="key-name" placeholder="e.g. OpenClaw Prod" />
                     </div>
                     <div class="form-group">
-                        <label for="key-service">Servicio</label>
-                        <div class="input-with-toggle">
-                            <select id="key-service-select">
-                                <option value="">-- Seleccionar --</option>
-                            </select>
-                            <span class="toggle-link" onclick="toggleServiceMode()">o crear nuevo</span>
-                            <input id="key-service-input" style="display:none" placeholder="Nombre del servicio" />
-                        </div>
+                        <label for="key-service-select">Servicio</label>
+                        <select id="key-service-select">
+                            <option value="">-- Seleccionar --</option>
+                            <option value="__new__">+ Nuevo servicio...</option>
+                        </select>
+                        <input id="key-service-input" style="display:none" placeholder="Nombre del nuevo servicio" />
                     </div>
                     <div class="form-group">
                         <label>Modelos permitidos</label>

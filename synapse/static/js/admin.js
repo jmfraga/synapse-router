@@ -189,16 +189,29 @@ async function initDropdowns() {
         providerData: cachedByProvider,
     });
 
-    // Populate service select
+    // Populate service select (insert before the "Nuevo" option)
     const serviceSelect = document.getElementById('key-service-select');
     if (serviceSelect) {
+        const newOpt = serviceSelect.querySelector('option[value="__new__"]');
         const services = servicesData.services || [];
         for (const s of services) {
             const opt = document.createElement('option');
             opt.value = s;
             opt.textContent = s;
-            serviceSelect.appendChild(opt);
+            serviceSelect.insertBefore(opt, newOpt);
         }
+
+        // Show text input when "+ Nuevo servicio..." is selected
+        const serviceInput = document.getElementById('key-service-input');
+        serviceSelect.addEventListener('change', () => {
+            if (serviceSelect.value === '__new__') {
+                serviceInput.style.display = '';
+                serviceInput.focus();
+            } else {
+                serviceInput.style.display = 'none';
+                serviceInput.value = '';
+            }
+        });
     }
 
     // Populate chain-model selects in route builder
@@ -358,29 +371,12 @@ async function deleteRoute(id) {
 }
 
 // --- API Keys ---
-function toggleServiceMode() {
-    const sel = document.getElementById('key-service-select');
-    const inp = document.getElementById('key-service-input');
-    const link = sel.parentElement.querySelector('.toggle-link');
-
-    if (sel.style.display === 'none') {
-        sel.style.display = '';
-        inp.style.display = 'none';
-        inp.value = '';
-        link.textContent = 'o crear nuevo';
-    } else {
-        sel.style.display = 'none';
-        inp.style.display = '';
-        link.textContent = 'o seleccionar existente';
-    }
-}
-
 async function createKey() {
     const name = document.getElementById('key-name').value.trim();
 
     const sel = document.getElementById('key-service-select');
     const inp = document.getElementById('key-service-input');
-    const service = sel.style.display === 'none' ? inp.value.trim() : sel.value;
+    const service = sel.value === '__new__' ? inp.value.trim() : sel.value;
 
     const msContainer = document.getElementById('key-models-ms');
     const models = msContainer?.getValue ? msContainer.getValue() : '*';
