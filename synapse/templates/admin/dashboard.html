@@ -10,12 +10,14 @@
     <header>
         <h1>⚡ Synapse Router</h1>
         <nav>
+            <a href="#dashboard">Dashboard</a>
             <a href="#providers">Providers</a>
             <a href="#routes">Rutas</a>
             <a href="#smart-routes">Smart Routes</a>
             <a href="#keys">API Keys</a>
             <a href="#audio">Audio</a>
-            <a href="#metrics">Métricas</a>
+            <a href="#arena">Arena</a>
+            <a href="#analytics">Analytics</a>
             <a href="#playground">Playground</a>
         </nav>
     </header>
@@ -24,19 +26,100 @@
         <!-- Key Expiry Alerts (populated by JS) -->
         <div id="key-alerts" style="display:none"></div>
 
-        <!-- Stats Overview -->
-        <section class="stats-bar">
-            <div class="stat">
-                <span class="stat-value">{{ stats.total_requests }}</span>
-                <span class="stat-label">Requests totales</span>
+        <!-- Dashboard Overview -->
+        <section id="dashboard">
+            <h2>Dashboard</h2>
+
+            <!-- Stats -->
+            <div class="stats-bar">
+                <div class="stat">
+                    <span class="stat-value">{{ stats.total_requests }}</span>
+                    <span class="stat-label">Requests totales</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value">${{ stats.total_cost }}</span>
+                    <span class="stat-label">Costo total</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value">{{ stats.avg_latency }}ms</span>
+                    <span class="stat-label">Latencia promedio</span>
+                </div>
             </div>
-            <div class="stat">
-                <span class="stat-value">${{ stats.total_cost }}</span>
-                <span class="stat-label">Costo total</span>
+
+            <!-- Today's activity (populated by JS) -->
+            <div class="dash-row">
+                <div class="dash-card">
+                    <h3>Actividad hoy</h3>
+                    <div id="dash-today" class="dash-today-stats">
+                        <span class="pc-msg">Cargando...</span>
+                    </div>
+                </div>
+                <div class="dash-card">
+                    <h3>Providers</h3>
+                    <div class="dash-providers">
+                        {% for p in providers %}
+                        <div class="dash-provider-row">
+                            <span class="dash-provider-name">{{ p.display_name }}</span>
+                            <span class="badge {{ 'active' if p.is_enabled else 'inactive' }}">
+                                {{ "On" if p.is_enabled else "Off" }}
+                            </span>
+                            {% if p.is_local %}
+                            <span class="badge" style="background:rgba(108,92,231,0.15);color:var(--accent)">Local</span>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
             </div>
-            <div class="stat">
-                <span class="stat-value">{{ stats.avg_latency }}ms</span>
-                <span class="stat-label">Latencia promedio</span>
+
+            <div class="dash-row">
+                <div class="dash-card">
+                    <h3>Smart Routes</h3>
+                    {% if smart_routes %}
+                    <div class="dash-smart-routes">
+                        {% for sr in smart_routes %}
+                        <div class="dash-sr-row">
+                            <span class="dash-sr-name">{{ sr.name }}</span>
+                            <code>{{ sr.trigger_model }}</code>
+                            <span class="badge {{ 'active' if sr.is_enabled else 'inactive' }}">
+                                {{ "Activo" if sr.is_enabled else "Inactivo" }}
+                            </span>
+                            <span class="dash-sr-intents">{{ sr.intents | length }} intents</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="section-desc">Sin smart routes configurados</p>
+                    {% endif %}
+                </div>
+                <div class="dash-card">
+                    <h3>API Keys</h3>
+                    <div class="dash-keys-summary">
+                        <div class="dash-keys-count">
+                            <span class="stat-value" style="font-size:1.4rem">{{ api_keys | selectattr('is_active') | list | length }}</span>
+                            <span class="stat-label">Activas</span>
+                        </div>
+                        <div class="dash-keys-count">
+                            <span class="stat-value" style="font-size:1.4rem;color:var(--danger)">{{ api_keys | rejectattr('is_active') | list | length }}</span>
+                            <span class="stat-label">Revocadas</span>
+                        </div>
+                        <div class="dash-keys-count">
+                            <span class="stat-value" style="font-size:1.4rem">{{ routes | length }}</span>
+                            <span class="stat-label">Rutas</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Top models today (populated by JS) -->
+            <div class="dash-card" style="margin-top:0.8rem">
+                <h3>Top modelos hoy</h3>
+                <table>
+                    <thead><tr>
+                        <th>Modelo</th><th>Provider</th><th>Requests</th><th>Tokens</th><th>Costo</th><th>Latencia avg</th>
+                    </tr></thead>
+                    <tbody id="dash-top-models"></tbody>
+                </table>
             </div>
         </section>
 
@@ -432,12 +515,177 @@
             </div>
         </section>
 
-        <!-- Metrics -->
-        <section id="metrics">
-            <h2>Métricas</h2>
-            <div id="metrics-content">
-                <button onclick="loadMetrics()">Cargar métricas</button>
-                <div id="metrics-data"></div>
+        <!-- Arena -->
+        <section id="arena">
+            <h2>Arena <span class="hint-inline">(comparación de modelos)</span></h2>
+            <p class="section-desc">
+                Compara modelos de todos los providers side-by-side. Califica respuestas para generar rankings
+                y recomendaciones de Smart Routes.
+            </p>
+
+            <div class="arena-tabs">
+                <button class="arena-tab active" onclick="switchArenaTab('battle')">Batalla</button>
+                <button class="arena-tab" onclick="switchArenaTab('scorecard')">Scorecard</button>
+                <button class="arena-tab" onclick="switchArenaTab('recommendations')">Recomendaciones</button>
+            </div>
+
+            <!-- Tab: Battle -->
+            <div id="arena-tab-battle" class="arena-tab-content">
+                <div class="smart-form" style="margin-top:1rem">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="arena-key">API Key</label>
+                            <input id="arena-key" placeholder="Pegar key (syn-...)" />
+                            <span class="hint">Keys activas: {% for k in api_keys %}{% if k.is_active %}{{ k.name }} ({{ k.key_prefix }}...) {% endif %}{% endfor %}</span>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="arena-model-1">Modelo 1</label>
+                            <select id="arena-model-1" class="arena-model-select">
+                                <option value="">-- Seleccionar --</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="arena-model-2">Modelo 2</label>
+                            <select id="arena-model-2" class="arena-model-select">
+                                <option value="">-- Seleccionar --</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="arena-model-3">Modelo 3 (opcional)</label>
+                            <select id="arena-model-3" class="arena-model-select">
+                                <option value="">-- Ninguno --</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="arena-model-4">Modelo 4 (opcional)</label>
+                            <select id="arena-model-4" class="arena-model-select">
+                                <option value="">-- Ninguno --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group" style="max-width:120px">
+                            <label for="arena-temp">Temperature</label>
+                            <input id="arena-temp" type="number" value="0.7" min="0" max="2" step="0.1" />
+                        </div>
+                        <div class="form-group" style="max-width:120px">
+                            <label for="arena-max-tokens">Max Tokens</label>
+                            <input id="arena-max-tokens" type="number" value="2048" min="64" max="16384" step="64" />
+                        </div>
+                        <div class="form-group">
+                            <label for="arena-category-filter">Categoría presets</label>
+                            <select id="arena-category-filter" onchange="filterArenaPresets(this.value)">
+                                <option value="all">Todas</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div id="arena-presets" class="arena-preset-chips">
+                        <!-- Populated by JS -->
+                    </div>
+
+                    <div class="form-group" style="margin-top:0.8rem">
+                        <label for="arena-prompt">Prompt</label>
+                        <textarea id="arena-prompt" placeholder="Escribe un prompt o selecciona un preset..." rows="3"></textarea>
+                    </div>
+
+                    <div class="form-actions">
+                        <button id="arena-run-btn" onclick="runArenaBattle()">Iniciar Batalla</button>
+                        <button class="btn-danger" onclick="stopArenaBattle()">Detener</button>
+                        <span id="arena-status" class="pc-msg"></span>
+                    </div>
+                </div>
+
+                <div id="arena-grid" class="arena-grid" style="margin-top:1rem">
+                    <!-- Panels populated by JS -->
+                </div>
+
+                <div id="arena-history" style="margin-top:1.5rem">
+                    <h3 style="font-size:0.95rem;color:var(--text-dim);margin-bottom:0.5rem">Historial reciente</h3>
+                    <table>
+                        <thead><tr>
+                            <th>#</th><th>Prompt</th><th>Categoría</th><th>Modelos</th><th>Fecha</th>
+                        </tr></thead>
+                        <tbody id="arena-history-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Tab: Scorecard -->
+            <div id="arena-tab-scorecard" class="arena-tab-content" style="display:none">
+                <div class="form-row" style="margin:1rem 0;align-items:center">
+                    <div class="form-group" style="max-width:200px">
+                        <label for="scorecard-min-battles">Mín. batallas</label>
+                        <input id="scorecard-min-battles" type="number" value="1" min="1" max="100" />
+                    </div>
+                    <div class="form-group" style="display:flex;flex-direction:column;justify-content:flex-end">
+                        <button onclick="loadArenaScorecard()">Actualizar</button>
+                    </div>
+                </div>
+                <div id="scorecard-table-container">
+                    <p class="section-desc">Ejecuta batallas y califica resultados para generar el scorecard.</p>
+                </div>
+            </div>
+
+            <!-- Tab: Recommendations -->
+            <div id="arena-tab-recommendations" class="arena-tab-content" style="display:none">
+                <div class="form-row" style="margin:1rem 0;align-items:center">
+                    <div class="form-group">
+                        <label for="rec-smart-route">Smart Route</label>
+                        <select id="rec-smart-route">
+                            <option value="">-- Seleccionar --</option>
+                            {% for sr in smart_routes %}
+                            <option value="{{ sr.id }}">{{ sr.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group" style="display:flex;flex-direction:column;justify-content:flex-end">
+                        <button onclick="loadArenaRecommendations()">Ver recomendaciones</button>
+                    </div>
+                </div>
+                <div id="recommendations-container">
+                    <p class="section-desc">Selecciona un Smart Route para ver recomendaciones basadas en el scorecard.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Analytics -->
+        <section id="analytics">
+            <h2>Analytics</h2>
+            <div class="analytics-range-filter">
+                <button class="range-btn active" data-days="1" onclick="loadAnalytics(1)">Hoy</button>
+                <button class="range-btn" data-days="7" onclick="loadAnalytics(7)">7 días</button>
+                <button class="range-btn" data-days="30" onclick="loadAnalytics(30)">30 días</button>
+                <button class="range-btn" data-days="0" onclick="loadAnalytics(0)">Todo</button>
+            </div>
+            <div id="analytics-cards" class="analytics-cards"></div>
+            <div id="analytics-timeline" class="analytics-chart-container">
+                <h3>Timeline</h3>
+                <canvas id="timeline-chart"></canvas>
+            </div>
+            <div id="analytics-tables">
+                <div class="analytics-table-group">
+                    <h3>Por Provider</h3>
+                    <table><thead><tr>
+                        <th>Provider</th><th>Requests</th><th>Tokens</th><th>Costo</th><th>Latencia avg</th><th>Error %</th><th>Fallback %</th>
+                    </tr></thead><tbody id="analytics-provider-body"></tbody></table>
+                </div>
+                <div class="analytics-table-group">
+                    <h3>Top Modelos</h3>
+                    <table><thead><tr>
+                        <th>Modelo</th><th>Provider</th><th>Requests</th><th>Tokens</th><th>Costo</th><th>Latencia avg</th>
+                    </tr></thead><tbody id="analytics-model-body"></tbody></table>
+                </div>
+                <div class="analytics-table-group">
+                    <h3>Por Servicio</h3>
+                    <table><thead><tr>
+                        <th>Servicio</th><th>Requests</th><th>Tokens</th><th>Costo</th>
+                    </tr></thead><tbody id="analytics-service-body"></tbody></table>
+                </div>
             </div>
         </section>
 
@@ -474,6 +722,7 @@
         </section>
     </main>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <script src="/static/js/admin.js"></script>
 </body>
 </html>

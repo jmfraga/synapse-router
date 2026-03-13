@@ -564,24 +564,132 @@ async function revokeKey(id) {
     location.reload();
 }
 
-// --- Metrics ---
-async function loadMetrics() {
-    const data = await api('/admin/api/metrics');
-    const container = document.getElementById('metrics-data');
+// --- Analytics ---
+let timelineChart = null;
 
-    let html = '<h3>Por Provider</h3><table><thead><tr><th>Provider</th><th>Requests</th><th>Tokens</th><th>Costo</th><th>Latencia</th></tr></thead><tbody>';
-    for (const p of data.by_provider) {
-        html += `<tr><td>${p.provider}</td><td>${p.requests}</td><td>${p.tokens}</td><td>$${p.cost}</td><td>${p.avg_latency}ms</td></tr>`;
-    }
-    html += '</tbody></table>';
+async function loadAnalytics(days = 7) {
+    // Update active button
+    document.querySelectorAll('.range-btn').forEach(btn => {
+        btn.classList.toggle('active', parseInt(btn.dataset.days) === days);
+    });
 
-    html += '<h3 style="margin-top:1.5rem">Requests Recientes</h3><table><thead><tr><th>Hora</th><th>Provider</th><th>Modelo</th><th>Tokens</th><th>Latencia</th><th>Costo</th><th>Estado</th></tr></thead><tbody>';
-    for (const l of data.recent.slice(0, 20)) {
-        const time = new Date(l.created_at).toLocaleString('es');
-        html += `<tr><td>${time}</td><td>${l.provider}</td><td>${l.model}</td><td>${l.tokens}</td><td>${l.latency_ms}ms</td><td>$${l.cost_usd}</td><td>${l.status}</td></tr>`;
+    const data = await api(`/admin/api/analytics?days=${days}`);
+    renderAnalyticsCards(data.summary);
+    renderAnalyticsProviders(data.by_provider);
+    renderAnalyticsModels(data.by_model);
+    renderAnalyticsServices(data.by_service);
+    renderTimeline(data.timeline);
+}
+
+function renderAnalyticsCards(s) {
+    const errorPct = s.total_requests ? (s.error_count / s.total_requests * 100).toFixed(1) : '0.0';
+    const fallbackPct = s.total_requests ? (s.fallback_count / s.total_requests * 100).toFixed(1) : '0.0';
+    document.getElementById('analytics-cards').innerHTML = `
+        <div class="acard"><span class="acard-value">${s.total_requests.toLocaleString()}</span><span class="acard-label">Requests</span></div>
+        <div class="acard"><span class="acard-value">$${s.total_cost.toFixed(4)}</span><span class="acard-label">Costo</span></div>
+        <div class="acard"><span class="acard-value">${s.total_tokens.toLocaleString()}</span><span class="acard-label">Tokens</span></div>
+        <div class="acard"><span class="acard-value">${s.avg_latency}ms</span><span class="acard-label">Latencia avg</span></div>
+        <div class="acard ${parseFloat(errorPct) > 5 ? 'acard-warn' : ''}"><span class="acard-value">${errorPct}%</span><span class="acard-label">Errores</span></div>
+        <div class="acard"><span class="acard-value">${fallbackPct}%</span><span class="acard-label">Fallbacks</span></div>
+    `;
+}
+
+function renderAnalyticsProviders(providers) {
+    const tbody = document.getElementById('analytics-provider-body');
+    tbody.innerHTML = providers.map(p => `
+        <tr>
+            <td>${p.provider}</td><td>${p.requests}</td><td>${p.tokens.toLocaleString()}</td>
+            <td>$${p.cost.toFixed(4)}</td><td>${p.avg_latency}ms</td>
+            <td>${p.error_rate}%</td><td>${p.fallback_rate}%</td>
+        </tr>
+    `).join('');
+}
+
+function renderAnalyticsModels(models) {
+    const tbody = document.getElementById('analytics-model-body');
+    tbody.innerHTML = models.map(m => `
+        <tr>
+            <td><code>${m.model}</code></td><td>${m.provider}</td><td>${m.requests}</td>
+            <td>${m.tokens.toLocaleString()}</td><td>$${m.cost.toFixed(4)}</td><td>${m.avg_latency}ms</td>
+        </tr>
+    `).join('');
+}
+
+function renderAnalyticsServices(services) {
+    const tbody = document.getElementById('analytics-service-body');
+    if (!services.length) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-dim)">Sin datos</td></tr>';
+        return;
     }
-    html += '</tbody></table>';
-    container.innerHTML = html;
+    tbody.innerHTML = services.map(s => `
+        <tr><td>${s.service}</td><td>${s.requests}</td><td>${s.tokens.toLocaleString()}</td><td>$${s.cost.toFixed(4)}</td></tr>
+    `).join('');
+}
+
+function renderTimeline(timeline) {
+    const ctx = document.getElementById('timeline-chart');
+    if (!ctx) return;
+
+    if (timelineChart) {
+        timelineChart.destroy();
+    }
+
+    if (!timeline.length) {
+        // Clear canvas if no data
+        const context2d = ctx.getContext('2d');
+        context2d.clearRect(0, 0, ctx.width, ctx.height);
+        return;
+    }
+
+    const labels = timeline.map(t => t.date);
+    timelineChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: 'Requests',
+                    data: timeline.map(t => t.requests),
+                    borderColor: '#6c5ce7',
+                    backgroundColor: 'rgba(108, 92, 231, 0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    yAxisID: 'y',
+                },
+                {
+                    label: 'Costo ($)',
+                    data: timeline.map(t => t.cost),
+                    borderColor: '#00b894',
+                    backgroundColor: 'rgba(0, 184, 148, 0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    yAxisID: 'y1',
+                },
+            ],
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { labels: { color: '#8b8fa3' } },
+            },
+            scales: {
+                x: { ticks: { color: '#8b8fa3' }, grid: { color: '#2a2d3a' } },
+                y: {
+                    position: 'left',
+                    title: { display: true, text: 'Requests', color: '#8b8fa3' },
+                    ticks: { color: '#8b8fa3' },
+                    grid: { color: '#2a2d3a' },
+                },
+                y1: {
+                    position: 'right',
+                    title: { display: true, text: 'Costo ($)', color: '#8b8fa3' },
+                    ticks: { color: '#8b8fa3' },
+                    grid: { drawOnChartArea: false },
+                },
+            },
+        },
+    });
 }
 
 // --- Playground ---
@@ -1552,8 +1660,616 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
+// --- Arena ---
+
+let arenaPresets = [];
+let arenaAbortControllers = [];
+let arenaBattleId = null;
+
+async function loadArenaPresets() {
+    const data = await api('/admin/api/arena/presets');
+    arenaPresets = [];
+    const categories = data.categories || [];
+    const presets = data.presets || {};
+
+    // Populate category filter
+    const filter = document.getElementById('arena-category-filter');
+    if (filter) {
+        for (const cat of categories) {
+            const opt = document.createElement('option');
+            opt.value = cat;
+            opt.textContent = cat;
+            filter.appendChild(opt);
+        }
+    }
+
+    // Render preset chips
+    const container = document.getElementById('arena-presets');
+    if (!container) return;
+    container.innerHTML = '';
+    for (const cat of categories) {
+        for (const p of (presets[cat] || [])) {
+            arenaPresets.push(p);
+            const chip = document.createElement('span');
+            chip.className = 'arena-preset-chip';
+            chip.dataset.category = p.category;
+            chip.dataset.prompt = p.prompt;
+            chip.textContent = `${p.category}: ${p.name}`;
+            chip.onclick = () => {
+                document.querySelectorAll('.arena-preset-chip').forEach(c => c.classList.remove('active'));
+                chip.classList.add('active');
+                document.getElementById('arena-prompt').value = p.prompt;
+            };
+            container.appendChild(chip);
+        }
+    }
+}
+
+function filterArenaPresets(category) {
+    const chips = document.querySelectorAll('.arena-preset-chip');
+    chips.forEach(c => {
+        c.style.display = (category === 'all' || c.dataset.category === category) ? '' : 'none';
+    });
+}
+
+function populateArenaModelSelects() {
+    for (let i = 1; i <= 4; i++) {
+        const sel = document.getElementById(`arena-model-${i}`);
+        if (!sel) continue;
+        const current = sel.value;
+        const isOptional = i > 2;
+        sel.innerHTML = isOptional ? '<option value="">-- Ninguno --</option>' : '<option value="">-- Seleccionar --</option>';
+
+        for (const pg of cachedByProvider) {
+            if (!pg.configured) continue;
+            const models = pg.models_typed
+                ? pg.models_typed.filter(m => m.type === 'language').map(m => m.name)
+                : pg.models;
+            if (models.length === 0) continue;
+            const group = document.createElement('optgroup');
+            group.label = pg.display_name;
+            for (const m of models) {
+                const opt = document.createElement('option');
+                opt.value = `${pg.provider}/${m}`;
+                opt.textContent = m;
+                group.appendChild(opt);
+            }
+            sel.appendChild(group);
+        }
+        if (current) sel.value = current;
+    }
+}
+
+function switchArenaTab(tab) {
+    document.querySelectorAll('.arena-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.arena-tab-content').forEach(c => c.style.display = 'none');
+    document.querySelector(`.arena-tab[onclick*="${tab}"]`).classList.add('active');
+    document.getElementById(`arena-tab-${tab}`).style.display = '';
+
+    if (tab === 'scorecard') loadArenaScorecard();
+    if (tab === 'battle') loadArenaHistory();
+}
+
+function stopArenaBattle() {
+    arenaAbortControllers.forEach(c => c.abort());
+    arenaAbortControllers = [];
+    document.getElementById('arena-run-btn').disabled = false;
+    document.getElementById('arena-status').textContent = 'Detenido';
+}
+
+async function runArenaBattle() {
+    const key = document.getElementById('arena-key').value.trim();
+    const prompt = document.getElementById('arena-prompt').value.trim();
+    const temp = parseFloat(document.getElementById('arena-temp').value) || 0.7;
+    const maxTokens = parseInt(document.getElementById('arena-max-tokens').value) || 2048;
+
+    if (!key) { document.getElementById('arena-status').textContent = 'Ingresa una API key'; return; }
+    if (!prompt) { document.getElementById('arena-status').textContent = 'Ingresa un prompt'; return; }
+
+    // Collect selected models
+    const models = [];
+    for (let i = 1; i <= 4; i++) {
+        const val = document.getElementById(`arena-model-${i}`).value;
+        if (val) {
+            const [provider, ...modelParts] = val.split('/');
+            models.push({ provider, model: modelParts.join('/'), selectValue: val });
+        }
+    }
+    if (models.length < 2) {
+        document.getElementById('arena-status').textContent = 'Selecciona al menos 2 modelos';
+        return;
+    }
+
+    // Determine category
+    const activePreset = document.querySelector('.arena-preset-chip.active');
+    const category = activePreset ? activePreset.dataset.category : 'custom';
+
+    // Create battle in DB
+    const battleRes = await api('/admin/api/arena/battles', 'POST', {
+        prompt, category, temperature: temp, max_tokens: maxTokens,
+    });
+    arenaBattleId = battleRes.id;
+
+    document.getElementById('arena-run-btn').disabled = true;
+    arenaAbortControllers = [];
+
+    // Build grid
+    const grid = document.getElementById('arena-grid');
+    grid.className = `arena-grid${models.length === 3 ? ' arena-grid-3' : models.length === 4 ? ' arena-grid-4' : ''}`;
+    grid.innerHTML = models.map((m, idx) => `
+        <div class="arena-panel" id="arena-panel-${idx}">
+            <div class="arena-panel-header">
+                <span>${m.provider}/${m.model}</span>
+                <span class="arena-tag" id="arena-tag-${idx}">queued</span>
+            </div>
+            <div class="arena-metrics">
+                <div class="arena-metric"><div class="arena-metric-value" id="arena-ttft-${idx}">-</div><div class="arena-metric-label">TTFT</div></div>
+                <div class="arena-metric"><div class="arena-metric-value" id="arena-tps-${idx}">-</div><div class="arena-metric-label">t/s</div></div>
+                <div class="arena-metric"><div class="arena-metric-value" id="arena-tokens-${idx}">-</div><div class="arena-metric-label">Tokens</div></div>
+                <div class="arena-metric"><div class="arena-metric-value" id="arena-total-${idx}">-</div><div class="arena-metric-label">Total</div></div>
+                <div class="arena-metric"><div class="arena-metric-value" id="arena-cost-${idx}">-</div><div class="arena-metric-label">Costo</div></div>
+            </div>
+            <div class="arena-response" id="arena-response-${idx}">Esperando...</div>
+            <div class="arena-rating" id="arena-rating-${idx}">
+                <span class="arena-rating-label">Rating:</span>
+                ${[1,2,3,4,5].map(r => `<button class="arena-rating-btn" onclick="rateArenaResult(${idx}, ${r})" data-rating="${r}">${r}</button>`).join('')}
+            </div>
+        </div>
+    `).join('');
+
+    // Determine execution order: local models sequential, cloud parallel
+    const localModels = [];
+    const cloudModels = [];
+    const providerLocalMap = {};
+    for (const p of cachedProviders) {
+        providerLocalMap[p.name] = p.is_local;
+    }
+
+    models.forEach((m, idx) => {
+        if (providerLocalMap[m.provider]) {
+            localModels.push({ ...m, idx });
+        } else {
+            cloudModels.push({ ...m, idx });
+        }
+    });
+
+    const status = document.getElementById('arena-status');
+
+    // Run local models sequentially
+    for (const m of localModels) {
+        status.textContent = `Ejecutando ${m.provider}/${m.model}...`;
+        await streamArenaModel(m.idx, m.provider, m.model, prompt, temp, maxTokens, key);
+    }
+
+    // Run cloud models in parallel
+    if (cloudModels.length > 0) {
+        status.textContent = `Ejecutando ${cloudModels.length} modelos cloud en paralelo...`;
+        await Promise.all(cloudModels.map(m =>
+            streamArenaModel(m.idx, m.provider, m.model, prompt, temp, maxTokens, key)
+        ));
+    }
+
+    // Highlight winners
+    highlightArenaWinners(models.length);
+
+    document.getElementById('arena-run-btn').disabled = false;
+    status.textContent = 'Batalla completada';
+    loadArenaHistory();
+}
+
+// Store result IDs for rating
+const arenaResultIds = {};
+
+async function streamArenaModel(idx, provider, model, prompt, temperature, maxTokens, apiKey) {
+    const controller = new AbortController();
+    arenaAbortControllers.push(controller);
+
+    const responseEl = document.getElementById(`arena-response-${idx}`);
+    const tagEl = document.getElementById(`arena-tag-${idx}`);
+    tagEl.textContent = 'streaming';
+    tagEl.className = 'arena-tag streaming';
+    responseEl.textContent = '';
+
+    const startTime = performance.now();
+    let firstTokenTime = null;
+    let tokenCount = 0;
+    let fullText = '';
+    let usageData = null;
+
+    // Use the actual model name through Synapse API (provider/model format for litellm)
+    const requestModel = model;
+
+    try {
+        const res = await fetch('/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+                model: requestModel,
+                stream: true,
+                temperature,
+                max_tokens: maxTokens,
+                messages: [{ role: 'user', content: prompt }],
+            }),
+            signal: controller.signal,
+        });
+
+        if (!res.ok) {
+            const err = await res.text();
+            throw new Error(`HTTP ${res.status}: ${err.substring(0, 200)}`);
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const text = decoder.decode(value, { stream: true });
+
+            for (const line of text.split('\n')) {
+                if (!line.startsWith('data: ') || line === 'data: [DONE]') continue;
+                try {
+                    const chunk = JSON.parse(line.slice(6));
+                    const content = chunk.choices?.[0]?.delta?.content || '';
+                    if (chunk.usage) usageData = chunk.usage;
+
+                    if (content) {
+                        if (!firstTokenTime) {
+                            firstTokenTime = performance.now();
+                            document.getElementById(`arena-ttft-${idx}`).textContent = Math.round(firstTokenTime - startTime);
+                        }
+                        fullText += content;
+                        tokenCount++;
+                        responseEl.innerHTML = renderArenaMarkdown(fullText) + '<span class="arena-streaming-cursor"></span>';
+                    }
+                } catch {}
+            }
+        }
+
+        const totalTimeMs = Math.round(performance.now() - startTime);
+        const totalTimeSec = totalTimeMs / 1000;
+        const completionTokens = usageData?.completion_tokens || tokenCount;
+        const tps = totalTimeSec > 0 ? (completionTokens / totalTimeSec).toFixed(1) : '0';
+        const costUsd = usageData?.cost || 0;
+
+        document.getElementById(`arena-tps-${idx}`).textContent = tps;
+        document.getElementById(`arena-tokens-${idx}`).textContent = completionTokens;
+        document.getElementById(`arena-total-${idx}`).textContent = totalTimeSec.toFixed(1) + 's';
+        document.getElementById(`arena-cost-${idx}`).textContent = costUsd > 0 ? '$' + costUsd.toFixed(4) : '-';
+
+        tagEl.textContent = 'done';
+        tagEl.className = 'arena-tag done';
+        responseEl.innerHTML = renderArenaMarkdown(fullText);
+
+        // Save result to DB
+        if (arenaBattleId) {
+            const resData = await api(`/admin/api/arena/battles/${arenaBattleId}/results`, 'POST', {
+                provider,
+                model,
+                ttft_ms: firstTokenTime ? Math.round(firstTokenTime - startTime) : 0,
+                tokens_per_sec: parseFloat(tps),
+                completion_tokens: completionTokens,
+                total_time_ms: totalTimeMs,
+                cost_usd: costUsd,
+                response_text: fullText,
+                status: 'success',
+            });
+            arenaResultIds[idx] = resData.id;
+        }
+
+    } catch (e) {
+        if (e.name === 'AbortError') {
+            tagEl.textContent = 'stopped';
+            tagEl.className = 'arena-tag error';
+        } else {
+            tagEl.textContent = 'error';
+            tagEl.className = 'arena-tag error';
+            responseEl.textContent = `Error: ${e.message}`;
+            // Save error result
+            if (arenaBattleId) {
+                const resData = await api(`/admin/api/arena/battles/${arenaBattleId}/results`, 'POST', {
+                    provider, model,
+                    response_text: e.message,
+                    status: 'error',
+                });
+                arenaResultIds[idx] = resData.id;
+            }
+        }
+    }
+}
+
+function highlightArenaWinners(count) {
+    const metrics = ['ttft', 'tps', 'tokens', 'total'];
+    const lowerBetter = ['ttft', 'total'];
+
+    for (const metric of metrics) {
+        const values = [];
+        for (let i = 0; i < count; i++) {
+            const el = document.getElementById(`arena-${metric}-${i}`);
+            const val = parseFloat(el?.textContent);
+            values.push(isNaN(val) ? null : val);
+        }
+        if (values.every(v => v === null)) continue;
+        const filtered = values.filter(v => v !== null);
+        const best = lowerBetter.includes(metric) ? Math.min(...filtered) : Math.max(...filtered);
+        for (let i = 0; i < count; i++) {
+            if (values[i] === best) {
+                const el = document.getElementById(`arena-${metric}-${i}`);
+                if (el) el.classList.add('winner');
+            }
+        }
+    }
+}
+
+async function rateArenaResult(panelIdx, rating) {
+    const resultId = arenaResultIds[panelIdx];
+    if (!resultId) return;
+
+    await api(`/admin/api/arena/results/${resultId}/rate`, 'PUT', { rating });
+
+    // Update button visual
+    const ratingContainer = document.getElementById(`arena-rating-${panelIdx}`);
+    ratingContainer.querySelectorAll('.arena-rating-btn').forEach(btn => {
+        const r = parseInt(btn.dataset.rating);
+        btn.classList.toggle('selected', r <= rating);
+    });
+}
+
+function renderArenaMarkdown(text) {
+    return text
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>');
+}
+
+async function loadArenaHistory() {
+    const data = await api('/admin/api/arena/battles?limit=20');
+    const tbody = document.getElementById('arena-history-body');
+    if (!tbody) return;
+
+    tbody.innerHTML = (data || []).map((b, i) => {
+        const models = (b.results || []).map(r => {
+            const ratingStr = r.rating ? ` (${r.rating}/5)` : '';
+            return `<code>${r.provider}/${r.model}</code>${ratingStr}`;
+        }).join(', ');
+        const date = new Date(b.created_at).toLocaleString();
+        return `<tr>
+            <td>${b.id}</td>
+            <td title="${(b.prompt || '').replace(/"/g, '&quot;')}">${(b.prompt || '').substring(0, 60)}${(b.prompt || '').length > 60 ? '...' : ''}</td>
+            <td>${b.category}</td>
+            <td>${models}</td>
+            <td style="font-size:0.8rem">${date}</td>
+        </tr>`;
+    }).join('');
+}
+
+async function loadArenaScorecard() {
+    const minBattles = parseInt(document.getElementById('scorecard-min-battles')?.value) || 1;
+    const data = await api(`/admin/api/arena/scorecard?min_battles=${minBattles}`);
+    const container = document.getElementById('scorecard-table-container');
+    if (!container) return;
+
+    if (!data || data.length === 0) {
+        container.innerHTML = '<p class="section-desc">No hay datos suficientes. Ejecuta batallas y califica resultados.</p>';
+        return;
+    }
+
+    // Build pivot: models as rows, categories as columns
+    const categories = [...new Set(data.map(r => r.category))].sort();
+    const modelKeys = [...new Set(data.map(r => `${r.provider}/${r.model}`))];
+
+    // Build lookup
+    const lookup = {};
+    for (const r of data) {
+        const key = `${r.provider}/${r.model}`;
+        if (!lookup[key]) lookup[key] = {};
+        lookup[key][r.category] = r;
+    }
+
+    // Compute overall avg for sorting
+    const modelAvgs = modelKeys.map(key => {
+        const cats = Object.values(lookup[key]);
+        const avg = cats.reduce((s, c) => s + c.avg_rating, 0) / cats.length;
+        return { key, avg };
+    }).sort((a, b) => b.avg - a.avg);
+
+    let html = `<table class="scorecard-table"><thead><tr><th>Modelo</th>`;
+    for (const cat of categories) html += `<th>${cat}</th>`;
+    html += `<th>Promedio</th><th>Batallas</th></tr></thead><tbody>`;
+
+    for (const { key } of modelAvgs) {
+        const row = lookup[key];
+        html += `<tr><td style="text-align:left;font-weight:600">${key}</td>`;
+        let totalRating = 0, totalCount = 0, totalBattles = 0;
+        for (const cat of categories) {
+            if (row[cat]) {
+                const r = row[cat];
+                const cls = r.avg_rating >= 4 ? 'high' : r.avg_rating >= 3 ? 'mid' : 'low';
+                html += `<td><span class="scorecard-cell ${cls}">${r.avg_rating}</span><br><span style="font-size:0.7rem;color:var(--text-dim)">${r.count} bat · ${r.avg_tps} t/s</span></td>`;
+                totalRating += r.avg_rating * r.count;
+                totalCount += r.count;
+                totalBattles += r.count;
+            } else {
+                html += '<td>-</td>';
+            }
+        }
+        const avg = totalCount > 0 ? (totalRating / totalCount).toFixed(2) : '-';
+        const avgCls = avg >= 4 ? 'high' : avg >= 3 ? 'mid' : avg !== '-' ? 'low' : '';
+        html += `<td><span class="scorecard-cell ${avgCls}">${avg}</span></td>`;
+        html += `<td>${totalBattles}</td></tr>`;
+    }
+
+    html += '</tbody></table>';
+    container.innerHTML = html;
+}
+
+async function loadArenaRecommendations() {
+    const srId = document.getElementById('rec-smart-route')?.value;
+    const container = document.getElementById('recommendations-container');
+    if (!srId || !container) {
+        if (container) container.innerHTML = '<p class="section-desc">Selecciona un Smart Route.</p>';
+        return;
+    }
+
+    const data = await api(`/admin/api/arena/recommendations/${srId}`);
+    if (!data || !data.recommendations) {
+        container.innerHTML = '<p class="section-desc">No se pudieron obtener recomendaciones.</p>';
+        return;
+    }
+
+    const recs = data.recommendations;
+    if (recs.length === 0) {
+        container.innerHTML = '<p class="section-desc">Este Smart Route no tiene intenciones configuradas.</p>';
+        return;
+    }
+
+    container.innerHTML = recs.map(r => {
+        const currentStr = r.current_provider && r.current_model
+            ? `${r.current_provider}/${r.current_model}${r.current_rating ? ' (' + r.current_rating + '/5)' : ''}`
+            : '(sin asignar)';
+        const recStr = r.recommended_provider && r.recommended_model
+            ? `${r.recommended_provider}/${r.recommended_model} (${r.recommended_rating}/5)`
+            : '(sin datos)';
+        const impCls = r.improvement > 0 ? 'positive' : r.improvement < 0 ? 'negative' : 'neutral';
+        const impStr = r.improvement !== null ? (r.improvement > 0 ? '+' : '') + r.improvement : '-';
+        const canApply = r.recommended_provider && r.recommended_model
+            && (r.recommended_provider !== r.current_provider || r.recommended_model !== r.current_model);
+
+        return `<div class="recommendation-row">
+            <span class="rec-intent">${r.intent_name}</span>
+            <span class="rec-current">${currentStr}</span>
+            <span class="rec-arrow">&rarr;</span>
+            <span class="rec-recommended">${recStr}</span>
+            <span class="rec-improvement ${impCls}">${impStr}</span>
+            ${canApply ? `<button class="btn-small" onclick="applyArenaRecommendation(${data.smart_route_id}, '${r.intent_name}', '${r.recommended_provider}', '${r.recommended_model}')">Aplicar</button>` : ''}
+        </div>`;
+    }).join('');
+}
+
+async function applyArenaRecommendation(smartRouteId, intentName, provider, model) {
+    if (!confirm(`¿Actualizar intent "${intentName}" a ${provider}/${model}?`)) return;
+    const res = await api('/admin/api/arena/apply-recommendation', 'POST', {
+        smart_route_id: smartRouteId,
+        intent_name: intentName,
+        provider,
+        model,
+    });
+    if (res.status === 'ok') {
+        alert(`Intent "${intentName}" actualizado a ${provider}/${model}`);
+        loadArenaRecommendations();
+    }
+}
+
+// --- Dashboard Overview ---
+
+async function loadDashboardOverview() {
+    const data = await api('/admin/api/analytics?days=1');
+    if (!data || !data.summary) return;
+
+    const s = data.summary;
+    const todayEl = document.getElementById('dash-today');
+    if (todayEl) {
+        todayEl.innerHTML = `
+            <div class="dash-today-stat">
+                <span class="stat-value">${s.total_requests}</span>
+                <span class="stat-label">Requests</span>
+            </div>
+            <div class="dash-today-stat">
+                <span class="stat-value">$${s.total_cost}</span>
+                <span class="stat-label">Costo</span>
+            </div>
+            <div class="dash-today-stat">
+                <span class="stat-value">${s.total_tokens.toLocaleString()}</span>
+                <span class="stat-label">Tokens</span>
+            </div>
+            <div class="dash-today-stat">
+                <span class="stat-value">${s.avg_latency}ms</span>
+                <span class="stat-label">Latencia</span>
+            </div>
+            <div class="dash-today-stat">
+                <span class="stat-value${s.error_count > 0 ? ' style="color:var(--danger)"' : ''}">${s.error_count}</span>
+                <span class="stat-label">Errores</span>
+            </div>
+        `;
+    }
+
+    const modelsBody = document.getElementById('dash-top-models');
+    if (modelsBody) {
+        const models = (data.by_model || []).slice(0, 8);
+        if (models.length === 0) {
+            modelsBody.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim);text-align:center">Sin actividad hoy</td></tr>';
+        } else {
+            modelsBody.innerHTML = models.map(m => `<tr>
+                <td><code>${m.model}</code></td>
+                <td>${m.provider}</td>
+                <td>${m.requests}</td>
+                <td>${m.tokens.toLocaleString()}</td>
+                <td>$${m.cost}</td>
+                <td>${m.avg_latency}ms</td>
+            </tr>`).join('');
+        }
+    }
+}
+
+// --- Section Navigation ---
+
+function navigateTo(sectionId) {
+    // Hide all sections, show target
+    document.querySelectorAll('main > section').forEach(s => s.classList.remove('active'));
+    const target = document.getElementById(sectionId);
+    if (target) target.classList.add('active');
+
+    // Update nav active state
+    document.querySelectorAll('nav a').forEach(a => {
+        a.classList.toggle('active', a.dataset.section === sectionId);
+    });
+
+    // Update URL hash without scrolling
+    history.replaceState(null, '', '#' + sectionId);
+
+    // Lazy-load section data
+    if (sectionId === 'dashboard') loadDashboardOverview();
+    if (sectionId === 'analytics') loadAnalytics(getCurrentAnalyticsDays());
+    if (sectionId === 'arena') { loadArenaHistory(); }
+    if (sectionId === 'audio') loadAudioModels();
+}
+
+function getCurrentAnalyticsDays() {
+    const active = document.querySelector('.range-btn.active');
+    return active ? parseInt(active.dataset.days) : 7;
+}
+
+function initNavigation() {
+    // Convert nav links to section navigation
+    document.querySelectorAll('nav a').forEach(a => {
+        const href = a.getAttribute('href');
+        if (href && href.startsWith('#')) {
+            const sectionId = href.slice(1);
+            a.dataset.section = sectionId;
+            a.removeAttribute('href');
+            a.addEventListener('click', (e) => {
+                e.preventDefault();
+                navigateTo(sectionId);
+            });
+        }
+    });
+
+    // Navigate to hash or default to dashboard
+    const hash = location.hash.slice(1);
+    const validSections = [...document.querySelectorAll('main > section')].map(s => s.id);
+    navigateTo(validSections.includes(hash) ? hash : 'dashboard');
+}
+
 // --- Boot ---
 document.addEventListener('DOMContentLoaded', () => {
-    initDropdowns();
-    loadAudioModels();
+    initNavigation();
+    initDropdowns().then(() => {
+        populateArenaModelSelects();
+    });
+    loadArenaPresets();
 });

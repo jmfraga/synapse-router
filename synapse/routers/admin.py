@@ -14,12 +14,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from sqlalchemy import select, func, desc
+from sqlalchemy import select, func, desc, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from synapse.config import get_settings
 from synapse.database import get_db
-from synapse.models import Provider, ApiKey, UsageLog, Route, SmartRoute
+from synapse.models import Provider, ApiKey, UsageLog, Route, SmartRoute, ArenaBattle, ArenaResult
 from synapse.services.auth import hash_key
 from synapse.services.model_types import classify_model_type, filter_language_models
 from synapse.routers.audio import get_audio_models
@@ -594,6 +594,318 @@ async def toggle_smart_route(route_id: int, db: AsyncSession = Depends(get_db)):
     return {"status": "ok", "is_enabled": sr.is_enabled}
 
 
+# --- Arena ---
+
+@router.get("/api/arena/presets")
+async def list_arena_presets():
+    """Return arena presets grouped by category."""
+    from synapse.services.arena_presets import ARENA_PRESETS, ARENA_CATEGORIES
+    by_cat = {c: [] for c in ARENA_CATEGORIES}
+    for p in ARENA_PRESETS:
+        by_cat.setdefault(p["category"], []).append(p)
+    return {"categories": ARENA_CATEGORIES, "presets": by_cat}
+
+
+class ArenaBattleCreate(BaseModel):
+    prompt: str
+    category: str = "custom"
+    temperature: float = 0.7
+    max_tokens: int = 2048
+
+
+@router.post("/api/arena/battles")
+async def create_arena_battle(data: ArenaBattleCreate, db: AsyncSession = Depends(get_db)):
+    battle = ArenaBattle(
+        prompt=data.prompt,
+        category=data.category,
+        temperature=data.temperature,
+        max_tokens=data.max_tokens,
+    )
+    db.add(battle)
+    await db.commit()
+    return {"status": "ok", "id": battle.id}
+
+
+@router.get("/api/arena/battles")
+async def list_arena_battles(
+    limit: int = 50,
+    category: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    q = select(ArenaBattle).order_by(desc(ArenaBattle.created_at)).limit(limit)
+    if category:
+        q = q.where(ArenaBattle.category == category)
+    result = await db.execute(q)
+    battles = result.scalars().all()
+
+    out = []
+    for b in battles:
+        # Fetch results for each battle
+        res = await db.execute(
+            select(ArenaResult).where(ArenaResult.battle_id == b.id)
+        )
+        results = res.scalars().all()
+        out.append({
+            "id": b.id,
+            "prompt": b.prompt,
+            "category": b.category,
+            "temperature": b.temperature,
+            "max_tokens": b.max_tokens,
+            "created_at": b.created_at.isoformat(),
+            "results": [
+                {
+                    "id": r.id,
+                    "provider": r.provider,
+                    "model": r.model,
+                    "ttft_ms": r.ttft_ms,
+                    "tokens_per_sec": r.tokens_per_sec,
+                    "completion_tokens": r.completion_tokens,
+                    "total_time_ms": r.total_time_ms,
+                    "cost_usd": r.cost_usd,
+                    "rating": r.rating,
+                    "status": r.status,
+                }
+                for r in results
+            ],
+        })
+    return out
+
+
+class ArenaResultCreate(BaseModel):
+    provider: str
+    model: str
+    ttft_ms: int = 0
+    tokens_per_sec: float = 0.0
+    completion_tokens: int = 0
+    total_time_ms: int = 0
+    cost_usd: float = 0.0
+    response_text: str = ""
+    status: str = "success"
+
+
+@router.post("/api/arena/battles/{battle_id}/results")
+async def create_arena_result(
+    battle_id: int, data: ArenaResultCreate, db: AsyncSession = Depends(get_db)
+):
+    battle = await db.get(ArenaBattle, battle_id)
+    if not battle:
+        raise HTTPException(404, "Battle not found")
+
+    result = ArenaResult(
+        battle_id=battle_id,
+        provider=data.provider,
+        model=data.model,
+        ttft_ms=data.ttft_ms,
+        tokens_per_sec=data.tokens_per_sec,
+        completion_tokens=data.completion_tokens,
+        total_time_ms=data.total_time_ms,
+        cost_usd=data.cost_usd,
+        response_text=data.response_text,
+        status=data.status,
+    )
+    db.add(result)
+    await db.commit()
+    return {"status": "ok", "id": result.id}
+
+
+class ArenaRating(BaseModel):
+    rating: int  # 1-5
+
+
+@router.put("/api/arena/results/{result_id}/rate")
+async def rate_arena_result(
+    result_id: int, data: ArenaRating, db: AsyncSession = Depends(get_db)
+):
+    result = await db.get(ArenaResult, result_id)
+    if not result:
+        raise HTTPException(404, "Result not found")
+    if data.rating < 1 or data.rating > 5:
+        raise HTTPException(400, "Rating must be 1-5")
+    result.rating = data.rating
+    await db.commit()
+    return {"status": "ok", "rating": result.rating}
+
+
+@router.get("/api/arena/scorecard")
+async def arena_scorecard(
+    min_battles: int = 1,
+    db: AsyncSession = Depends(get_db),
+):
+    """Rankings: avg rating per model and category."""
+    q = await db.execute(
+        select(
+            ArenaResult.provider,
+            ArenaResult.model,
+            ArenaBattle.category,
+            func.avg(ArenaResult.rating).label("avg_rating"),
+            func.count(ArenaResult.id).label("count"),
+            func.avg(ArenaResult.tokens_per_sec).label("avg_tps"),
+            func.avg(ArenaResult.ttft_ms).label("avg_ttft"),
+        )
+        .join(ArenaBattle, ArenaResult.battle_id == ArenaBattle.id)
+        .where(ArenaResult.rating.isnot(None))
+        .group_by(ArenaResult.provider, ArenaResult.model, ArenaBattle.category)
+        .having(func.count(ArenaResult.id) >= min_battles)
+        .order_by(desc("avg_rating"))
+    )
+    rows = q.all()
+    return [
+        {
+            "provider": r.provider,
+            "model": r.model,
+            "category": r.category,
+            "avg_rating": round(float(r.avg_rating), 2),
+            "count": r.count,
+            "avg_tps": round(float(r.avg_tps), 1) if r.avg_tps else 0,
+            "avg_ttft": round(float(r.avg_ttft)) if r.avg_ttft else 0,
+        }
+        for r in rows
+    ]
+
+
+# Mapping from smart route intent names to arena categories
+INTENT_CATEGORY_MAP = {
+    "medicina": "medicine",
+    "medical": "medicine",
+    "medicine": "medicine",
+    "coding": "coding",
+    "programación": "coding",
+    "code": "coding",
+    "tool_use": "tool_use",
+    "herramientas": "tool_use",
+    "tools": "tool_use",
+    "reasoning": "reasoning",
+    "razonamiento": "reasoning",
+    "simple": "simple",
+    "general": "simple",
+    "conversación": "simple",
+    "spanish": "spanish",
+    "español": "spanish",
+}
+
+
+@router.get("/api/arena/recommendations/{smart_route_id}")
+async def arena_recommendations(
+    smart_route_id: int, db: AsyncSession = Depends(get_db)
+):
+    """Compare scorecard vs current Smart Route assignment."""
+    sr = await db.get(SmartRoute, smart_route_id)
+    if not sr:
+        raise HTTPException(404, "Smart route not found")
+
+    intents = json.loads(sr.intents_json) if sr.intents_json else []
+
+    # Get top-rated model per category
+    scorecard_q = await db.execute(
+        select(
+            ArenaResult.provider,
+            ArenaResult.model,
+            ArenaBattle.category,
+            func.avg(ArenaResult.rating).label("avg_rating"),
+            func.count(ArenaResult.id).label("count"),
+        )
+        .join(ArenaBattle, ArenaResult.battle_id == ArenaBattle.id)
+        .where(ArenaResult.rating.isnot(None))
+        .group_by(ArenaResult.provider, ArenaResult.model, ArenaBattle.category)
+        .having(func.count(ArenaResult.id) >= 1)
+        .order_by(desc("avg_rating"))
+    )
+    scorecard = scorecard_q.all()
+
+    # Build best model per category
+    best_by_cat = {}
+    for row in scorecard:
+        if row.category not in best_by_cat:
+            best_by_cat[row.category] = {
+                "provider": row.provider,
+                "model": row.model,
+                "avg_rating": round(float(row.avg_rating), 2),
+                "count": row.count,
+            }
+
+    recommendations = []
+    for intent in intents:
+        intent_name = intent.get("name", "").lower()
+        category = INTENT_CATEGORY_MAP.get(intent_name)
+        current_chain = intent.get("provider_chain", [])
+        current = current_chain[0] if current_chain else {}
+
+        rec = {
+            "intent_name": intent.get("name", ""),
+            "intent_description": intent.get("description", ""),
+            "category": category,
+            "current_provider": current.get("provider", ""),
+            "current_model": current.get("model", ""),
+            "current_rating": None,
+            "recommended_provider": None,
+            "recommended_model": None,
+            "recommended_rating": None,
+            "improvement": None,
+        }
+
+        if category and category in best_by_cat:
+            best = best_by_cat[category]
+            rec["recommended_provider"] = best["provider"]
+            rec["recommended_model"] = best["model"]
+            rec["recommended_rating"] = best["avg_rating"]
+
+            # Find current model's rating in this category
+            for row in scorecard:
+                if (row.category == category
+                        and row.provider == current.get("provider")
+                        and row.model == current.get("model")):
+                    rec["current_rating"] = round(float(row.avg_rating), 2)
+                    break
+
+            if rec["current_rating"] and rec["recommended_rating"]:
+                rec["improvement"] = round(rec["recommended_rating"] - rec["current_rating"], 2)
+
+        recommendations.append(rec)
+
+    return {
+        "smart_route_id": sr.id,
+        "smart_route_name": sr.name,
+        "recommendations": recommendations,
+    }
+
+
+class ApplyRecommendation(BaseModel):
+    smart_route_id: int
+    intent_name: str
+    provider: str
+    model: str
+
+
+@router.post("/api/arena/apply-recommendation")
+async def apply_arena_recommendation(
+    data: ApplyRecommendation, db: AsyncSession = Depends(get_db)
+):
+    """Update a Smart Route intent with the recommended model."""
+    sr = await db.get(SmartRoute, data.smart_route_id)
+    if not sr:
+        raise HTTPException(404, "Smart route not found")
+
+    intents = json.loads(sr.intents_json) if sr.intents_json else []
+    updated = False
+
+    for intent in intents:
+        if intent.get("name") == data.intent_name:
+            chain = intent.get("provider_chain", [])
+            if chain:
+                chain[0] = {"provider": data.provider, "model": data.model}
+            else:
+                intent["provider_chain"] = [{"provider": data.provider, "model": data.model}]
+            updated = True
+            break
+
+    if not updated:
+        raise HTTPException(404, f"Intent '{data.intent_name}' not found in smart route")
+
+    sr.intents_json = json.dumps(intents)
+    await db.commit()
+    return {"status": "ok", "intent": data.intent_name, "model": f"{data.provider}/{data.model}"}
+
+
 # --- Helpers for provider key/model resolution ---
 
 KNOWN_MODELS = {
@@ -801,6 +1113,157 @@ async def list_services(db: AsyncSession = Depends(get_db)):
     )
     services = [row[0] for row in result.all()]
     return {"services": sorted(services)}
+
+
+@router.get("/api/analytics")
+async def get_analytics(
+    days: int = 7,
+    db: AsyncSession = Depends(get_db),
+):
+    """Comprehensive analytics endpoint for the dashboard."""
+    # Date filter
+    if days > 0:
+        cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=days)
+        date_filter = UsageLog.created_at >= cutoff
+    else:
+        date_filter = True  # no filter — all time
+
+    base = select(UsageLog).where(date_filter)
+
+    # Summary
+    summary_q = await db.execute(
+        select(
+            func.count(UsageLog.id).label("total_requests"),
+            func.coalesce(func.sum(UsageLog.cost_usd), 0).label("total_cost"),
+            func.coalesce(func.sum(UsageLog.total_tokens), 0).label("total_tokens"),
+            func.coalesce(func.avg(UsageLog.latency_ms), 0).label("avg_latency"),
+            func.sum(case((UsageLog.status == "error", 1), else_=0)).label("error_count"),
+            func.sum(case((UsageLog.status == "fallback", 1), else_=0)).label("fallback_count"),
+        ).where(date_filter)
+    )
+    s = summary_q.one()
+    summary = {
+        "total_requests": s.total_requests,
+        "total_cost": round(float(s.total_cost), 4),
+        "total_tokens": int(s.total_tokens),
+        "avg_latency": round(float(s.avg_latency)),
+        "error_count": int(s.error_count or 0),
+        "fallback_count": int(s.fallback_count or 0),
+    }
+
+    # By provider
+    prov_q = await db.execute(
+        select(
+            UsageLog.provider,
+            func.count(UsageLog.id).label("requests"),
+            func.coalesce(func.sum(UsageLog.total_tokens), 0).label("tokens"),
+            func.coalesce(func.sum(UsageLog.cost_usd), 0).label("cost"),
+            func.coalesce(func.avg(UsageLog.latency_ms), 0).label("avg_latency"),
+            func.sum(case((UsageLog.status == "error", 1), else_=0)).label("errors"),
+            func.sum(case((UsageLog.status == "fallback", 1), else_=0)).label("fallbacks"),
+        ).where(date_filter).group_by(UsageLog.provider)
+    )
+    by_provider = []
+    for row in prov_q:
+        req = row.requests
+        by_provider.append({
+            "provider": row.provider,
+            "requests": req,
+            "tokens": int(row.tokens),
+            "cost": round(float(row.cost), 4),
+            "avg_latency": round(float(row.avg_latency)),
+            "error_rate": round((row.errors or 0) / req * 100, 1) if req else 0,
+            "fallback_rate": round((row.fallbacks or 0) / req * 100, 1) if req else 0,
+        })
+
+    # By model (top 20)
+    model_q = await db.execute(
+        select(
+            UsageLog.model,
+            UsageLog.provider,
+            func.count(UsageLog.id).label("requests"),
+            func.coalesce(func.sum(UsageLog.total_tokens), 0).label("tokens"),
+            func.coalesce(func.sum(UsageLog.cost_usd), 0).label("cost"),
+            func.coalesce(func.avg(UsageLog.latency_ms), 0).label("avg_latency"),
+        ).where(date_filter)
+        .group_by(UsageLog.model, UsageLog.provider)
+        .order_by(desc("requests"))
+        .limit(20)
+    )
+    by_model = [
+        {
+            "model": row.model,
+            "provider": row.provider,
+            "requests": row.requests,
+            "tokens": int(row.tokens),
+            "cost": round(float(row.cost), 4),
+            "avg_latency": round(float(row.avg_latency)),
+        }
+        for row in model_q
+    ]
+
+    # By service (join with api_keys)
+    svc_q = await db.execute(
+        select(
+            ApiKey.service,
+            func.count(UsageLog.id).label("requests"),
+            func.coalesce(func.sum(UsageLog.total_tokens), 0).label("tokens"),
+            func.coalesce(func.sum(UsageLog.cost_usd), 0).label("cost"),
+        ).join(ApiKey, UsageLog.api_key_id == ApiKey.id)
+        .where(date_filter)
+        .group_by(ApiKey.service)
+    )
+    by_service = [
+        {
+            "service": row.service,
+            "requests": row.requests,
+            "tokens": int(row.tokens),
+            "cost": round(float(row.cost), 4),
+        }
+        for row in svc_q
+    ]
+
+    # Timeline (by day)
+    timeline_q = await db.execute(
+        select(
+            func.date(UsageLog.created_at).label("date"),
+            func.count(UsageLog.id).label("requests"),
+            func.coalesce(func.sum(UsageLog.cost_usd), 0).label("cost"),
+            func.coalesce(func.sum(UsageLog.total_tokens), 0).label("tokens"),
+        ).where(date_filter)
+        .group_by(func.date(UsageLog.created_at))
+        .order_by(func.date(UsageLog.created_at))
+    )
+    timeline = [
+        {
+            "date": str(row.date),
+            "requests": row.requests,
+            "cost": round(float(row.cost), 4),
+            "tokens": int(row.tokens),
+        }
+        for row in timeline_q
+    ]
+
+    # By status
+    status_q = await db.execute(
+        select(
+            UsageLog.status,
+            func.count(UsageLog.id).label("count"),
+        ).where(date_filter).group_by(UsageLog.status)
+    )
+    by_status = [
+        {"status": row.status, "count": row.count}
+        for row in status_q
+    ]
+
+    return {
+        "summary": summary,
+        "by_provider": by_provider,
+        "by_model": by_model,
+        "by_service": by_service,
+        "timeline": timeline,
+        "by_status": by_status,
+    }
 
 
 @router.get("/api/metrics")
