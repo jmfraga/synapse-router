@@ -27,15 +27,17 @@ class RouterEngine:
         self, model: str, db: AsyncSession,
         messages: list[dict] | None = None,
         api_key_id: int = 0,
-    ) -> list[dict]:
+    ) -> tuple[list[dict], str, str]:
         """Find the best provider chain for a given model request.
 
-        Returns ordered list of {provider, model, base_url, api_key} dicts.
+        Returns (chain, smart_route_name, intent) where chain is an ordered
+        list of {provider, model, base_url, api_key} dicts.
         """
         # 0. Check smart routes (intent-based routing)
         smart = await self._check_smart_route(model, messages, db, api_key_id)
         if smart is not None:
-            return smart
+            chain, sr_name, intent = smart
+            return chain, sr_name, intent
 
         # 1. Check explicit routes first
         stmt = (
@@ -49,10 +51,10 @@ class RouterEngine:
         for route in routes:
             if self._matches_pattern(model, route.model_pattern):
                 chain = json.loads(route.provider_chain)
-                return await self._resolve_chain(chain, db)
+                return await self._resolve_chain(chain, db), "", ""
 
         # 2. No explicit route — build dynamic chain based on provider priority
-        return await self._build_dynamic_chain(model, db)
+        return await self._build_dynamic_chain(model, db), "", ""
 
     async def complete(
         self,
@@ -64,7 +66,9 @@ class RouterEngine:
         **kwargs,
     ):
         """Route a completion request through the provider chain."""
-        chain = await self.resolve_route(model, db, messages=messages, api_key_id=api_key_id)
+        chain, sr_name, intent = await self.resolve_route(
+            model, db, messages=messages, api_key_id=api_key_id
+        )
 
         if not chain:
             raise ValueError(f"No available provider for model: {model}")
@@ -102,6 +106,8 @@ class RouterEngine:
                         f"{t['provider']}/{t['model']}" for t in chain[: i + 1]
                     ),
                     stream=stream,
+                    smart_route_name=sr_name,
+                    intent=intent,
                 )
 
                 # Update provider latency tracking
@@ -126,6 +132,8 @@ class RouterEngine:
                     status="error",
                     route_path=f"{target['provider']}/{target['model']}",
                     stream=stream,
+                    smart_route_name=sr_name,
+                    intent=intent,
                 )
                 continue
 
@@ -134,10 +142,11 @@ class RouterEngine:
     async def _check_smart_route(
         self, model: str, messages: list[dict] | None, db: AsyncSession,
         api_key_id: int = 0,
-    ) -> list[dict] | None:
+    ) -> tuple[list[dict], str, str] | None:
         """Check if the request should use a smart route.
 
         Priority: key-specific smart route > global trigger match.
+        Returns (chain, smart_route_name, intent) or None.
         """
         smart_route = None
 
@@ -165,6 +174,8 @@ class RouterEngine:
         if not smart_route:
             return None
 
+        sr_name = smart_route.name
+
         # Extract the user message for classification
         user_message = ""
         if messages:
@@ -177,13 +188,12 @@ class RouterEngine:
 
         if not user_message:
             logger.warning("Smart route triggered but no user message found, using default")
-            import json
             default_chain = json.loads(smart_route.default_chain_json)
-            return await self._resolve_chain(default_chain, db)
+            return await self._resolve_chain(default_chain, db), sr_name, "default"
 
         intent_name, chain = await classify_intent(user_message, smart_route, db)
-        logger.info(f"Smart route '{smart_route.name}': intent={intent_name}")
-        return await self._resolve_chain(chain, db)
+        logger.info(f"Smart route '{sr_name}': intent={intent_name}")
+        return await self._resolve_chain(chain, db), sr_name, intent_name
 
     def _matches_pattern(self, model: str, pattern: str) -> bool:
         """Check if a model name matches a route pattern. Supports * wildcard."""
@@ -274,6 +284,8 @@ class RouterEngine:
         status: str,
         route_path: str,
         stream: bool,
+        smart_route_name: str = "",
+        intent: str = "",
     ):
         """Log usage metrics to database."""
         prompt_tokens = 0
@@ -301,6 +313,8 @@ class RouterEngine:
             cost_usd=cost,
             status=status,
             route_path=route_path,
+            smart_route_name=smart_route_name,
+            intent=intent,
         )
         db.add(log)
         await db.commit()

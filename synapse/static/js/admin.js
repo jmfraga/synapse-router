@@ -566,6 +566,7 @@ async function revokeKey(id) {
 
 // --- Analytics ---
 let timelineChart = null;
+let latencyTimelineChart = null;
 
 async function loadAnalytics(days = 7) {
     // Update active button
@@ -579,6 +580,10 @@ async function loadAnalytics(days = 7) {
     renderAnalyticsModels(data.by_model);
     renderAnalyticsServices(data.by_service);
     renderTimeline(data.timeline);
+    renderAnalyticsIntents(data.by_intent || []);
+    renderAnalyticsFallbacks(data.fallback_paths || []);
+    renderLatencyTimeline(data.latency_timeline || []);
+    renderCostVsQuality(data.cost_vs_quality || []);
 }
 
 function renderAnalyticsCards(s) {
@@ -690,6 +695,95 @@ function renderTimeline(timeline) {
             },
         },
     });
+}
+
+function renderAnalyticsIntents(intents) {
+    const tbody = document.getElementById('analytics-intent-body');
+    if (!intents.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-dim)">Sin datos de Smart Routes</td></tr>';
+        return;
+    }
+    tbody.innerHTML = intents.map(i => `
+        <tr>
+            <td><code>${i.smart_route}</code></td><td>${i.intent}</td><td>${i.requests}</td>
+            <td>$${i.cost.toFixed(4)}</td><td>${i.avg_latency}ms</td>
+            <td>${i.errors}</td><td>${i.fallbacks}</td>
+        </tr>
+    `).join('');
+}
+
+function renderAnalyticsFallbacks(paths) {
+    const tbody = document.getElementById('analytics-fallback-body');
+    if (!paths.length) {
+        tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--text-dim)">Sin fallbacks</td></tr>';
+        return;
+    }
+    tbody.innerHTML = paths.map(p => `
+        <tr><td><code>${p.route_path}</code></td><td>${p.count}</td></tr>
+    `).join('');
+}
+
+function renderLatencyTimeline(data) {
+    const ctx = document.getElementById('latency-timeline-chart');
+    if (!ctx) return;
+    if (latencyTimelineChart) latencyTimelineChart.destroy();
+    if (!data.length) {
+        const c = ctx.getContext('2d');
+        c.clearRect(0, 0, ctx.width, ctx.height);
+        return;
+    }
+
+    // Group by provider
+    const providers = [...new Set(data.map(d => d.provider))];
+    const dates = [...new Set(data.map(d => d.date))].sort();
+    const colors = ['#6c5ce7', '#00b894', '#e17055', '#0984e3', '#fdcb6e', '#e84393', '#00cec9'];
+
+    const datasets = providers.map((prov, idx) => {
+        const provData = data.filter(d => d.provider === prov);
+        const byDate = Object.fromEntries(provData.map(d => [d.date, d.avg_latency]));
+        return {
+            label: prov,
+            data: dates.map(d => byDate[d] || null),
+            borderColor: colors[idx % colors.length],
+            tension: 0.3,
+            spanGaps: true,
+        };
+    });
+
+    latencyTimelineChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: dates, datasets },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { labels: { color: '#8b8fa3' } } },
+            scales: {
+                x: { ticks: { color: '#8b8fa3' }, grid: { color: '#2a2d3a' } },
+                y: {
+                    title: { display: true, text: 'Latencia (ms)', color: '#8b8fa3' },
+                    ticks: { color: '#8b8fa3' },
+                    grid: { color: '#2a2d3a' },
+                },
+            },
+        },
+    });
+}
+
+function renderCostVsQuality(data) {
+    const tbody = document.getElementById('analytics-cvq-body');
+    if (!data.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-dim)">Sin datos</td></tr>';
+        return;
+    }
+    tbody.innerHTML = data.map(d => {
+        const rating = d.avg_rating !== null ? `${d.avg_rating} (${d.arena_battles})` : '<span style="color:var(--text-dim)">—</span>';
+        const spd = d.score_per_dollar !== null ? d.score_per_dollar.toLocaleString() : '<span style="color:var(--text-dim)">—</span>';
+        return `<tr>
+            <td><code>${d.model}</code></td><td>${d.provider}</td><td>${d.requests}</td>
+            <td>$${d.total_cost.toFixed(4)}</td><td>$${d.avg_cost_per_req.toFixed(6)}</td>
+            <td>${d.avg_latency}ms</td><td>${rating}</td><td>${spd}</td>
+        </tr>`;
+    }).join('');
 }
 
 // --- Playground ---

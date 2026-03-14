@@ -688,6 +688,28 @@
                         <th>Servicio</th><th>Requests</th><th>Tokens</th><th>Costo</th>
                     </tr></thead><tbody id="analytics-service-body"></tbody></table>
                 </div>
+                <div class="analytics-table-group">
+                    <h3>Smart Routes — Por Intención</h3>
+                    <table><thead><tr>
+                        <th>Smart Route</th><th>Intent</th><th>Requests</th><th>Costo</th><th>Latencia avg</th><th>Errores</th><th>Fallbacks</th>
+                    </tr></thead><tbody id="analytics-intent-body"></tbody></table>
+                </div>
+                <div class="analytics-table-group">
+                    <h3>Fallback Paths</h3>
+                    <table><thead><tr>
+                        <th>Ruta (provider → fallback)</th><th>Veces</th>
+                    </tr></thead><tbody id="analytics-fallback-body"></tbody></table>
+                </div>
+                <div class="analytics-table-group">
+                    <h3>Costo vs Calidad</h3>
+                    <table><thead><tr>
+                        <th>Modelo</th><th>Provider</th><th>Requests</th><th>Costo total</th><th>$/req</th><th>Latencia</th><th>Rating ⭐</th><th>Score/$</th>
+                    </tr></thead><tbody id="analytics-cvq-body"></tbody></table>
+                </div>
+            </div>
+            <div id="analytics-latency-timeline" class="analytics-chart-container">
+                <h3>Latencia por Provider (tendencia)</h3>
+                <canvas id="latency-timeline-chart"></canvas>
             </div>
         </section>
 

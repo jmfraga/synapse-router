@@ -1256,6 +1256,122 @@ async def get_analytics(
         for row in status_q
     ]
 
+    # By smart route + intent
+    intent_q = await db.execute(
+        select(
+            UsageLog.smart_route_name,
+            UsageLog.intent,
+            func.count(UsageLog.id).label("requests"),
+            func.coalesce(func.sum(UsageLog.cost_usd), 0).label("cost"),
+            func.coalesce(func.avg(UsageLog.latency_ms), 0).label("avg_latency"),
+            func.sum(case((UsageLog.status == "error", 1), else_=0)).label("errors"),
+            func.sum(case((UsageLog.status == "fallback", 1), else_=0)).label("fallbacks"),
+        ).where(date_filter, UsageLog.smart_route_name != "")
+        .group_by(UsageLog.smart_route_name, UsageLog.intent)
+        .order_by(UsageLog.smart_route_name, desc("requests"))
+    )
+    by_intent = [
+        {
+            "smart_route": row.smart_route_name,
+            "intent": row.intent,
+            "requests": row.requests,
+            "cost": round(float(row.cost), 4),
+            "avg_latency": round(float(row.avg_latency)),
+            "errors": int(row.errors or 0),
+            "fallbacks": int(row.fallbacks or 0),
+        }
+        for row in intent_q
+    ]
+
+    # Provider latency timeline (daily avg per provider)
+    latency_q = await db.execute(
+        select(
+            func.date(UsageLog.created_at).label("date"),
+            UsageLog.provider,
+            func.coalesce(func.avg(UsageLog.latency_ms), 0).label("avg_latency"),
+            func.count(UsageLog.id).label("requests"),
+        ).where(date_filter, UsageLog.status != "error")
+        .group_by(func.date(UsageLog.created_at), UsageLog.provider)
+        .order_by(func.date(UsageLog.created_at))
+    )
+    latency_timeline = [
+        {
+            "date": str(row.date),
+            "provider": row.provider,
+            "avg_latency": round(float(row.avg_latency)),
+            "requests": row.requests,
+        }
+        for row in latency_q
+    ]
+
+    # Fallback details: which provider failed -> which took over
+    fallback_q = await db.execute(
+        select(
+            UsageLog.route_path,
+            func.count(UsageLog.id).label("count"),
+        ).where(date_filter, UsageLog.status == "fallback")
+        .group_by(UsageLog.route_path)
+        .order_by(desc("count"))
+        .limit(20)
+    )
+    fallback_paths = [
+        {"route_path": row.route_path, "count": row.count}
+        for row in fallback_q
+    ]
+
+    # Cost vs Quality: cross Arena ratings with usage_log costs per model
+    cvq_q = await db.execute(
+        select(
+            UsageLog.provider,
+            UsageLog.model,
+            func.count(UsageLog.id).label("requests"),
+            func.coalesce(func.sum(UsageLog.cost_usd), 0).label("total_cost"),
+            func.coalesce(func.avg(UsageLog.cost_usd), 0).label("avg_cost"),
+            func.coalesce(func.avg(UsageLog.latency_ms), 0).label("avg_latency"),
+            func.coalesce(func.sum(UsageLog.total_tokens), 0).label("total_tokens"),
+        ).where(date_filter, UsageLog.status != "error")
+        .group_by(UsageLog.provider, UsageLog.model)
+        .having(func.count(UsageLog.id) >= 1)
+        .order_by(desc("requests"))
+    )
+    # Get Arena ratings per model (all-time, independent of date filter)
+    arena_q = await db.execute(
+        select(
+            ArenaResult.provider,
+            ArenaResult.model,
+            func.avg(ArenaResult.rating).label("avg_rating"),
+            func.count(ArenaResult.id).label("arena_battles"),
+        )
+        .where(ArenaResult.rating.isnot(None))
+        .group_by(ArenaResult.provider, ArenaResult.model)
+    )
+    arena_ratings = {
+        (r.provider, r.model): {
+            "avg_rating": round(float(r.avg_rating), 2),
+            "arena_battles": r.arena_battles,
+        }
+        for r in arena_q
+    }
+
+    cost_vs_quality = []
+    for row in cvq_q:
+        arena = arena_ratings.get((row.provider, row.model), {})
+        avg_rating = arena.get("avg_rating")
+        total_cost = float(row.total_cost)
+        entry = {
+            "provider": row.provider,
+            "model": row.model,
+            "requests": row.requests,
+            "total_cost": round(total_cost, 4),
+            "avg_cost_per_req": round(float(row.avg_cost), 6),
+            "avg_latency": round(float(row.avg_latency)),
+            "total_tokens": int(row.total_tokens),
+            "avg_rating": avg_rating,
+            "arena_battles": arena.get("arena_battles", 0),
+            "score_per_dollar": round(avg_rating / total_cost, 1) if avg_rating and total_cost > 0 else None,
+        }
+        cost_vs_quality.append(entry)
+
     return {
         "summary": summary,
         "by_provider": by_provider,
@@ -1263,6 +1379,10 @@ async def get_analytics(
         "by_service": by_service,
         "timeline": timeline,
         "by_status": by_status,
+        "by_intent": by_intent,
+        "latency_timeline": latency_timeline,
+        "fallback_paths": fallback_paths,
+        "cost_vs_quality": cost_vs_quality,
     }
 
 

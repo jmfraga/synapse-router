@@ -19,6 +19,8 @@ class UsageLog(Base):
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[str] = mapped_column(String(20), default="success")  # success, error, fallback
     route_path: Mapped[str] = mapped_column(String(200), default="")  # which route was used
+    smart_route_name: Mapped[str] = mapped_column(String(100), default="", index=True)
+    intent: Mapped[str] = mapped_column(String(50), default="")
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=datetime.datetime.utcnow, index=True
     )

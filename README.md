@@ -72,6 +72,40 @@
 - **Recomendaciones**: compara scorecard vs asignación actual de Smart Routes
 - **Apply**: actualiza Smart Route con modelo recomendado en un click
 
+### Analytics
+- **Dashboard completo**: requests, costos, tokens, latencia, errores, fallbacks
+- **Por provider**: requests, tokens, costo, latencia promedio, error %, fallback %
+- **Por modelo**: top 20 modelos con métricas detalladas
+- **Por servicio**: uso por API key/servicio
+- **Smart Routes — Por intención**: requests, costo, latencia, errores y fallbacks por intent clasificado
+- **Costo vs Calidad**: cruza ratings del Arena con costos reales de uso — score/dólar por modelo
+- **Latencia por provider**: gráfico de tendencia diaria con líneas por provider (Chart.js)
+- **Fallback tracking**: qué cadenas de fallback se activaron y cuántas veces
+- **Timeline**: gráfico de requests y costos por día con filtros (Hoy, 7d, 30d, Todo)
+
+### QA Module (`synapse-qa`)
+Sistema de QA integrado para medir el pipeline completo — clasificador → ruta → modelo → respuesta.
+
+```bash
+# Classifier QA: eval intent accuracy con confusion matrix
+python -m synapse.qa classify --route openclaw-smart -v
+
+# Pipeline QA: request real al endpoint + LLM judge
+python -m synapse.qa pipeline --key syn-xxx --judge ollama/llama3.1:8b
+
+# Smoke test post-cambio de ruta (3 tests/intent, threshold 80%)
+python -m synapse.qa smoke --route openclaw-smart
+
+# Historial de runs para detectar regresiones
+python -m synapse.qa history
+```
+
+- **Tests en Markdown** con YAML frontmatter (inspirado en PinchBench)
+- **3 modos**: classifier-only, pipeline completo, smoke test rápido
+- **LLM Judge**: evalúa calidad de respuesta en escala 1-5
+- **Histórico en SQLite**: detección automática de regresiones (Δ accuracy)
+- **Confusion matrix**: por ruta e intención con colores
+
 ### Panel de Administración
 - **Dashboard overview** con estado del sistema, actividad del día y top modelos
 - **Navegación SPA** — secciones independientes con lazy-loading
@@ -80,7 +114,6 @@
 - **Test de conexión** por provider y modelo
 - **Gestión de rutas**: CRUD completo para rutas explícitas y Smart Routes
 - **API keys por servicio**: generación, revocación, modelos permitidos, asignación de Smart Route
-- **Analytics**: requests, costos, latencia, por provider/modelo/servicio con timeline
 - **Playground**: probar chat completions directo desde el panel
 - **Audio**: transcribir archivos o grabar desde el micrófono, generar y reproducir TTS
 
