@@ -12,10 +12,6 @@
 
 ## Arquitectura
 
-<p align="center">
-  <img src="docs/Synapse Router medium.png" alt="Synapse Router - Intelligent LLM Routing" width="600">
-</p>
-
 ```
 [Servicios: OpenClaw, MedExpert, etc.]
             │
@@ -39,6 +35,10 @@
   Local Groq NV  Anth OAI Gem Perp
 (Ollama)    vidia opic   ini lxty
 ```
+
+<p align="center">
+  <img src="docs/Gemini_Generated_Image_bqvb7kbqvb7kbqvb.png" alt="Synapse Router - Arquitectura" width="700">
+</p>
 
 ## Features
 
