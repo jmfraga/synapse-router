@@ -12,6 +12,10 @@
 
 ## Arquitectura
 
+<p align="center">
+  <img src="docs/Synapse Router medium.png" alt="Synapse Router - Intelligent LLM Routing" width="600">
+</p>
+
 ```
 [Servicios: OpenClaw, MedExpert, etc.]
             │

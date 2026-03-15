@@ -88,6 +88,16 @@ async def transcribe_audio(
         if resp.status_code != 200:
             raise HTTPException(502, f"Whisper server error: {resp.text}")
 
+        # Validate response is valid JSON before parsing
+        resp_text = resp.text.strip()
+        if not resp_text:
+            raise HTTPException(502, "Whisper server returned empty response")
+        try:
+            result = resp.json()
+        except Exception:
+            logger.error(f"Whisper server returned invalid JSON: {resp_text[:200]}")
+            raise HTTPException(502, f"Whisper server returned invalid response")
+
         elapsed_ms = int((time.monotonic() - start) * 1000)
 
         # Log usage
@@ -106,7 +116,6 @@ async def transcribe_audio(
         db.add(log)
         await db.commit()
 
-        result = resp.json()
         return result
 
     except httpx.ConnectError:

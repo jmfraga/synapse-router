@@ -35,6 +35,12 @@ async function api(path, method = 'GET', body = null) {
         location.reload(); // Force browser to re-prompt for credentials
         return {};
     }
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const msg = err.detail || `Error ${res.status}: ${res.statusText}`;
+        alert(msg);
+        throw new Error(msg);
+    }
     return res.json();
 }
 
@@ -388,7 +394,7 @@ function addChainStep() {
     div.className = 'chain-step';
     div.dataset.index = index;
     div.innerHTML = `
-        <select class="chain-provider">
+        <select class="chain-provider" onchange="onChainProviderChange(this)">
             <option value="">-- Provider --</option>
             ${providerOptions}
         </select>
@@ -398,15 +404,18 @@ function addChainStep() {
         <button type="button" class="btn-small btn-danger" onclick="removeChainStep(this)">✕</button>
     `;
     builder.appendChild(div);
-
-    // Populate the new chain-model select
-    const modelSel = div.querySelector('.chain-model');
-    populateSingleChainModel(modelSel);
 }
 
-function populateSingleChainModel(sel) {
+function populateSingleChainModel(sel, filterProvider = '') {
+    // Clear existing options beyond the placeholder
+    while (sel.options.length > 1) sel.remove(1);
+    // Remove existing optgroups
+    sel.querySelectorAll('optgroup').forEach(g => g.remove());
+
     if (cachedByProvider.length > 0) {
         for (const pg of cachedByProvider) {
+            // Filter by provider if specified
+            if (filterProvider && pg.provider !== filterProvider) continue;
             // Only show language models in chain selects
             let models = pg.models;
             if (pg.models_typed) {
@@ -426,6 +435,11 @@ function populateSingleChainModel(sel) {
             sel.appendChild(group);
         }
     }
+}
+
+function onChainProviderChange(providerSel) {
+    const modelSel = providerSel.closest('.chain-step').querySelector('.chain-model');
+    populateSingleChainModel(modelSel, providerSel.value);
 }
 
 function removeChainStep(btn) {
@@ -470,6 +484,7 @@ function editRoute(id, name, pattern, priority) {
             addChainStep();
             const lastStep = builder.lastElementChild;
             lastStep.querySelector('.chain-provider').value = step.provider;
+            populateSingleChainModel(lastStep.querySelector('.chain-model'), step.provider);
             lastStep.querySelector('.chain-model').value = step.model;
         }
     } else {
@@ -903,7 +918,7 @@ function addIntent() {
             <label>Cadena de providers para esta intención</label>
             <div class="intent-chain-steps">
                 <div class="chain-step">
-                    <select class="chain-provider">
+                    <select class="chain-provider" onchange="onChainProviderChange(this)">
                         <option value="">-- Provider --</option>
                         ${providerOptions}
                     </select>
@@ -931,7 +946,7 @@ function addIntentChainStep(btn) {
     const div = document.createElement('div');
     div.className = 'chain-step';
     div.innerHTML = `
-        <select class="chain-provider">
+        <select class="chain-provider" onchange="onChainProviderChange(this)">
             <option value="">-- Provider --</option>
             ${providerOptions}
         </select>
@@ -941,7 +956,6 @@ function addIntentChainStep(btn) {
         <button type="button" class="btn-small btn-danger" onclick="removeIntentChainStep(this)">✕</button>
     `;
     stepsContainer.appendChild(div);
-    populateSingleChainModel(div.querySelector('.chain-model'));
 }
 
 function removeIntentChainStep(btn) {
@@ -960,7 +974,7 @@ function addDefaultChainStep() {
     const div = document.createElement('div');
     div.className = 'chain-step';
     div.innerHTML = `
-        <select class="chain-provider">
+        <select class="chain-provider" onchange="onChainProviderChange(this)">
             <option value="">-- Provider --</option>
             ${providerOptions}
         </select>
@@ -970,7 +984,6 @@ function addDefaultChainStep() {
         <button type="button" class="btn-small btn-danger" onclick="removeDefaultChainStep(this)">✕</button>
     `;
     container.appendChild(div);
-    populateSingleChainModel(div.querySelector('.chain-model'));
 }
 
 function removeDefaultChainStep(btn) {
@@ -1021,6 +1034,7 @@ function editSmartRoute(id) {
             addIntentChainStep(addBtn);
             const lastStep = stepsContainer.lastElementChild;
             lastStep.querySelector('.chain-provider').value = step.provider;
+            populateSingleChainModel(lastStep.querySelector('.chain-model'), step.provider);
             lastStep.querySelector('.chain-model').value = step.model;
         }
     }
@@ -1033,6 +1047,7 @@ function editSmartRoute(id) {
         addDefaultChainStep();
         const lastStep = defaultContainer.lastElementChild;
         lastStep.querySelector('.chain-provider').value = step.provider;
+        populateSingleChainModel(lastStep.querySelector('.chain-model'), step.provider);
         lastStep.querySelector('.chain-model').value = step.model;
     }
     if (defaultChain.length === 0) addDefaultChainStep();
