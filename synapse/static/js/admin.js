@@ -245,6 +245,18 @@ async function initDropdowns() {
         providerData: cachedByProvider,
     });
 
+    // Fetch smart routes for the multi-select
+    const smartRoutesData = await api('/admin/api/smart-routes');
+    window._smartRoutes = smartRoutesData || [];
+    const srOptions = window._smartRoutes.filter(sr => sr.is_enabled).map(sr => sr.name);
+    createMultiSelect('key-smart-routes-ms', srOptions, {
+        allValue: '__none__',
+        allLabel: '(ninguna)',
+    });
+
+    // Load keys table from API
+    loadKeysTable();
+
     // Populate service select (insert before the "Nuevo" option)
     const serviceSelect = document.getElementById('key-service-select');
     if (serviceSelect) {
@@ -546,6 +558,55 @@ async function deleteRoute(id) {
 }
 
 // --- API Keys ---
+
+function getSmartRouteIds(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container || !container.getValue) return [];
+    const val = container.getValue();
+    if (val === '__none__') return [];
+    return val.split(',').map(name => {
+        const sr = (window._smartRoutes || []).find(s => s.name === name);
+        return sr ? sr.id : null;
+    }).filter(Boolean);
+}
+
+async function loadKeysTable() {
+    const keys = await api('/admin/api/keys');
+    const container = document.getElementById('keys-table-container');
+    if (!container) return;
+
+    const rows = keys.map(k => {
+        const srBadges = (k.smart_routes || []).map(sr =>
+            `<code class="badge active" style="margin:1px">${sr.name}</code>`
+        ).join(' ') || '—';
+        const actions = k.is_active
+            ? `<button onclick="editKey(${k.id})">Editar</button> <button onclick="revokeKey(${k.id})">Revocar</button>`
+            : '';
+        return `<tr>
+            <td>${k.name}</td>
+            <td>${k.service}</td>
+            <td><code>${k.key_prefix}...</code></td>
+            <td>${k.allowed_models}</td>
+            <td>${srBadges}</td>
+            <td>${k.rate_limit_rpm}</td>
+            <td><span class="badge ${k.is_active ? 'active' : 'inactive'}">${k.is_active ? 'Activa' : 'Revocada'}</span></td>
+            <td>${actions}</td>
+        </tr>`;
+    }).join('');
+
+    container.innerHTML = `<table>
+        <thead><tr>
+            <th>Nombre</th><th>Servicio</th><th>Prefijo</th>
+            <th>Modelos</th><th>Smart Routes</th><th>RPM</th>
+            <th>Estado</th><th>Acciones</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+    </table>`;
+
+    // Store keys data for edit
+    window._keysData = keys;
+}
+
 async function createKey() {
     const name = document.getElementById('key-name').value.trim();
 
@@ -556,27 +617,88 @@ async function createKey() {
     const msContainer = document.getElementById('key-models-ms');
     const models = msContainer?.getValue ? msContainer.getValue() : '*';
 
-    const smartRouteVal = document.getElementById('key-smart-route')?.value;
-    const smartRouteId = smartRouteVal ? parseInt(smartRouteVal) || null : null;
+    const smartRouteIds = getSmartRouteIds('key-smart-routes-ms');
 
     if (!name || !service) {
         alert('Nombre y servicio son requeridos');
         return;
     }
 
-    const body = { name, service, allowed_models: models };
-    if (smartRouteId) body.smart_route_id = smartRouteId;
+    const body = { name, service, allowed_models: models, smart_route_ids: smartRouteIds };
 
     const result = await api('/admin/api/keys', 'POST', body);
 
     document.getElementById('new-key-value').textContent = result.key;
     document.getElementById('new-key-display').style.display = 'block';
+    loadKeysTable();
+}
+
+async function editKey(id) {
+    const key = (window._keysData || []).find(k => k.id === id);
+    if (!key) return;
+
+    document.getElementById('edit-key-id').value = id;
+    document.getElementById('edit-key-name').value = key.name;
+    document.getElementById('edit-key-service').value = key.service;
+
+    // Build smart routes multi-select for edit
+    const srOptions = (window._smartRoutes || []).filter(sr => sr.is_enabled).map(sr => sr.name);
+    createMultiSelect('edit-key-smart-routes-ms', srOptions, {
+        allValue: '__none__',
+        allLabel: '(ninguna)',
+    });
+
+    // Pre-select assigned routes
+    const assignedNames = (key.smart_routes || []).map(sr => sr.name);
+    if (assignedNames.length > 0) {
+        const container = document.getElementById('edit-key-smart-routes-ms');
+        const dropdown = container.querySelector('.ms-dropdown');
+        if (dropdown) {
+            const allCb = dropdown.querySelector('input[value="__none__"]');
+            if (allCb) allCb.checked = false;
+            dropdown.querySelectorAll('input:not([value="__none__"])').forEach(cb => {
+                cb.checked = assignedNames.includes(cb.value);
+            });
+            // Update display
+            const display = container.querySelector('.ms-display');
+            if (display) {
+                display.textContent = assignedNames.length > 2
+                    ? `${assignedNames.length} rutas seleccionadas`
+                    : assignedNames.join(', ');
+            }
+        }
+    }
+
+    document.getElementById('edit-key-modal').style.display = 'block';
+}
+
+async function saveKeyEdit() {
+    const id = parseInt(document.getElementById('edit-key-id').value);
+    const name = document.getElementById('edit-key-name').value.trim();
+    const service = document.getElementById('edit-key-service').value.trim();
+    const smartRouteIds = getSmartRouteIds('edit-key-smart-routes-ms');
+
+    if (!name || !service) {
+        alert('Nombre y servicio son requeridos');
+        return;
+    }
+
+    await api(`/admin/api/keys/${id}`, 'PUT', {
+        name, service, smart_route_ids: smartRouteIds
+    });
+
+    document.getElementById('edit-key-modal').style.display = 'none';
+    loadKeysTable();
+}
+
+function cancelKeyEdit() {
+    document.getElementById('edit-key-modal').style.display = 'none';
 }
 
 async function revokeKey(id) {
     if (!confirm('¿Revocar esta key? No se puede deshacer.')) return;
     await api(`/admin/api/keys/${id}`, 'DELETE');
-    location.reload();
+    loadKeysTable();
 }
 
 // --- Analytics ---
@@ -1257,7 +1379,13 @@ function renderProviderConfigCards() {
                         Descubrir modelos
                     </button>
                     <span id="pc-msg-${p.id}" class="pc-msg"></span>
-                </div>` : `<span id="pc-msg-${p.id}" class="pc-msg"></span>`}
+                </div>` : `
+                <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.5rem">
+                    <button class="btn-secondary btn-small pc-discover-btn" onclick="discoverModels(${p.id})">
+                        Descubrir modelos
+                    </button>
+                    <span id="pc-msg-${p.id}" class="pc-msg"></span>
+                </div>`}
                 <div class="pc-test-section" style="margin-top:0.8rem;padding-top:0.8rem;border-top:1px solid var(--border)">
                     <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
                         <label style="font-size:0.85rem;font-weight:500;margin:0">Probar conexión:</label>

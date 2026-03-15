@@ -36,10 +36,24 @@ async def _run_migrations(conn):
             pass  # column already exists
 
 
+async def _migrate_smart_route_ids(conn):
+    """One-time migration: copy api_keys.smart_route_id → junction table."""
+    try:
+        await conn.execute(text(
+            "INSERT OR IGNORE INTO api_key_smart_routes (api_key_id, smart_route_id) "
+            "SELECT id, smart_route_id FROM api_keys "
+            "WHERE smart_route_id IS NOT NULL"
+        ))
+        logger.info("Migration: smart_route_id → api_key_smart_routes (done or no-op)")
+    except Exception:
+        pass  # table doesn't exist yet or already migrated
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _run_migrations(conn)
+        await _migrate_smart_route_ids(conn)
 
 
 async def get_db():

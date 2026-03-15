@@ -371,14 +371,9 @@
                         <div id="key-models-ms"></div>
                     </div>
                     <div class="form-group">
-                        <label for="key-smart-route">Smart Route</label>
-                        <select id="key-smart-route">
-                            <option value="">(ninguno — ruteo global)</option>
-                            {% for sr in smart_routes %}
-                            <option value="{{ sr.id }}">{{ sr.name }}</option>
-                            {% endfor %}
-                        </select>
-                        <span class="hint">Perfil de ruteo inteligente para esta key</span>
+                        <label>Smart Routes</label>
+                        <div id="key-smart-routes-ms"></div>
+                        <span class="hint">Rutas expuestas como modelos virtuales al cliente</span>
                     </div>
                     <div class="form-group">
                         <label>&nbsp;</label>
@@ -391,42 +386,34 @@
                 <code id="new-key-value"></code>
                 <button class="btn-small" onclick="this.parentElement.style.display='none'" style="margin-left:1rem">Cerrar</button>
             </div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Nombre</th>
-                        <th>Servicio</th>
-                        <th>Prefijo</th>
-                        <th>Modelos</th>
-                        <th>Smart Route</th>
-                        <th>RPM</th>
-                        <th>Estado</th>
-                        <th>Acciones</th>
-                    </tr>
-                </thead>
-                <tbody>
-                {% for k in api_keys %}
-                    <tr>
-                        <td>{{ k.name }}</td>
-                        <td>{{ k.service }}</td>
-                        <td><code>{{ k.key_prefix }}...</code></td>
-                        <td>{{ k.allowed_models }}</td>
-                        <td>{% if k.smart_route_id %}<code>{{ k.smart_route_id }}</code>{% else %}—{% endif %}</td>
-                        <td>{{ k.rate_limit_rpm }}</td>
-                        <td>
-                            <span class="badge {{ 'active' if k.is_active else 'inactive' }}">
-                                {{ "Activa" if k.is_active else "Revocada" }}
-                            </span>
-                        </td>
-                        <td>
-                            {% if k.is_active %}
-                            <button onclick="revokeKey({{ k.id }})">Revocar</button>
-                            {% endif %}
-                        </td>
-                    </tr>
-                {% endfor %}
-                </tbody>
-            </table>
+            <div id="keys-table-container">
+                <!-- Populated by JS from API -->
+            </div>
+
+            <!-- Edit Key Modal -->
+            <div id="edit-key-modal" style="display:none" class="key-alert">
+                <h3 style="margin-bottom:0.8rem">Editar API Key</h3>
+                <input type="hidden" id="edit-key-id" />
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-key-name">Nombre</label>
+                        <input id="edit-key-name" />
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-key-service">Servicio</label>
+                        <input id="edit-key-service" />
+                    </div>
+                    <div class="form-group">
+                        <label>Smart Routes</label>
+                        <div id="edit-key-smart-routes-ms"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>&nbsp;</label>
+                        <button onclick="saveKeyEdit()">Guardar</button>
+                        <button onclick="cancelKeyEdit()" style="margin-left:0.5rem;background:var(--text-muted)">Cancelar</button>
+                    </div>
+                </div>
+            </div>
         </section>
 
         <!-- Audio -->

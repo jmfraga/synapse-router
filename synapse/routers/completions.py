@@ -7,10 +7,11 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from synapse.database import get_db
-from synapse.models import ApiKey
+from synapse.models import ApiKey, ApiKeySmartRoute, SmartRoute
 from synapse.services.auth import authenticate
 from synapse.services.router import router_engine
 
@@ -38,11 +39,21 @@ async def chat_completions(
     api_key: ApiKey = Depends(authenticate),
     db: AsyncSession = Depends(get_db),
 ):
-    # Check model access
+    # Check model access — smart routes assigned to this key are always allowed
     if api_key.allowed_models != "*":
         allowed = [m.strip() for m in api_key.allowed_models.split(",")]
         if request.model not in allowed:
-            raise HTTPException(403, f"Model '{request.model}' not allowed for this key")
+            # Check if it's an assigned smart route name
+            sr_check = await db.execute(
+                select(ApiKeySmartRoute.smart_route_id)
+                .join(SmartRoute, SmartRoute.id == ApiKeySmartRoute.smart_route_id)
+                .where(
+                    ApiKeySmartRoute.api_key_id == api_key.id,
+                    SmartRoute.name == request.model,
+                )
+            )
+            if not sr_check.scalar_one_or_none():
+                raise HTTPException(403, f"Model '{request.model}' not allowed for this key")
 
     kwargs = {}
     if request.temperature is not None:

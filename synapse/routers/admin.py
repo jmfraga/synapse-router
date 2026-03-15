@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from synapse.config import get_settings
 from synapse.database import get_db
-from synapse.models import Provider, ApiKey, UsageLog, Route, SmartRoute, ArenaBattle, ArenaResult
+from synapse.models import Provider, ApiKey, ApiKeySmartRoute, UsageLog, Route, SmartRoute, ArenaBattle, ArenaResult
 from synapse.services.auth import hash_key
 from synapse.services.model_types import classify_model_type, filter_language_models
 from synapse.routers.audio import get_audio_models
@@ -381,7 +381,15 @@ class CreateKeyRequest(BaseModel):
     service: str
     allowed_models: str = "*"
     rate_limit_rpm: int = 60
-    smart_route_id: Optional[int] = None
+    smart_route_ids: list[int] = []
+
+
+class UpdateKeyRequest(BaseModel):
+    name: Optional[str] = None
+    service: Optional[str] = None
+    allowed_models: Optional[str] = None
+    rate_limit_rpm: Optional[int] = None
+    smart_route_ids: Optional[list[int]] = None
 
 
 @router.post("/api/keys")
@@ -394,11 +402,15 @@ async def create_api_key(data: CreateKeyRequest, db: AsyncSession = Depends(get_
         service=data.service,
         allowed_models=data.allowed_models,
         rate_limit_rpm=data.rate_limit_rpm,
-        smart_route_id=data.smart_route_id,
     )
     db.add(key)
+    await db.flush()  # get key.id
+
+    # Insert smart route associations
+    for sr_id in data.smart_route_ids:
+        db.add(ApiKeySmartRoute(api_key_id=key.id, smart_route_id=sr_id))
+
     await db.commit()
-    # Return raw key only once — it cannot be retrieved after this
     return {"key": raw_key, "id": key.id, "name": key.name}
 
 
@@ -407,25 +419,62 @@ async def list_api_keys(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(ApiKey))
     keys = result.scalars().all()
 
-    # Fetch smart route names for display
-    sr_names = {}
-    sr_ids = {k.smart_route_id for k in keys if k.smart_route_id}
-    if sr_ids:
+    # Fetch smart route assignments from junction table
+    key_routes: dict[int, list[dict]] = {}
+    if keys:
         sr_result = await db.execute(
-            select(SmartRoute.id, SmartRoute.name).where(SmartRoute.id.in_(sr_ids))
+            select(
+                ApiKeySmartRoute.api_key_id,
+                SmartRoute.id,
+                SmartRoute.name,
+            )
+            .join(SmartRoute, SmartRoute.id == ApiKeySmartRoute.smart_route_id)
         )
-        sr_names = {row[0]: row[1] for row in sr_result.all()}
+        for row in sr_result.all():
+            key_routes.setdefault(row[0], []).append({"id": row[1], "name": row[2]})
 
     return [
         {
             "id": k.id, "name": k.name, "key_prefix": k.key_prefix,
             "service": k.service, "is_active": k.is_active,
             "allowed_models": k.allowed_models, "rate_limit_rpm": k.rate_limit_rpm,
-            "smart_route_id": k.smart_route_id,
-            "smart_route_name": sr_names.get(k.smart_route_id, ""),
+            "smart_routes": key_routes.get(k.id, []),
         }
         for k in keys
     ]
+
+
+@router.put("/api/keys/{key_id}")
+async def update_api_key(key_id: int, data: UpdateKeyRequest, db: AsyncSession = Depends(get_db)):
+    key = await db.get(ApiKey, key_id)
+    if not key:
+        raise HTTPException(404, "Key not found")
+    if not key.is_active:
+        raise HTTPException(400, "Cannot edit a revoked key")
+
+    if data.name is not None:
+        key.name = data.name
+    if data.service is not None:
+        key.service = data.service
+    if data.allowed_models is not None:
+        key.allowed_models = data.allowed_models
+    if data.rate_limit_rpm is not None:
+        key.rate_limit_rpm = data.rate_limit_rpm
+
+    # Update smart route associations
+    if data.smart_route_ids is not None:
+        # Remove existing
+        existing = await db.execute(
+            select(ApiKeySmartRoute).where(ApiKeySmartRoute.api_key_id == key_id)
+        )
+        for assoc in existing.scalars().all():
+            await db.delete(assoc)
+        # Add new
+        for sr_id in data.smart_route_ids:
+            db.add(ApiKeySmartRoute(api_key_id=key_id, smart_route_id=sr_id))
+
+    await db.commit()
+    return {"status": "updated", "id": key_id}
 
 
 @router.delete("/api/keys/{key_id}")

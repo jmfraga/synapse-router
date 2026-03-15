@@ -20,7 +20,7 @@ class ApiKey(Base):
     rate_limit_rpm: Mapped[int] = mapped_column(default=60)  # requests per minute
     smart_route_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("smart_routes.id"), nullable=True, default=None
-    )  # assigned smart route profile (None = use global)
+    )  # legacy: single smart route (migrated to junction table)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=datetime.datetime.utcnow
     )
@@ -28,3 +28,18 @@ class ApiKey(Base):
     @staticmethod
     def generate_key() -> str:
         return f"syn-{secrets.token_urlsafe(32)}"
+
+
+class ApiKeySmartRoute(Base):
+    """Junction table: many-to-many between API keys and Smart Routes.
+
+    Smart route names are exposed to clients as virtual model names.
+    """
+    __tablename__ = "api_key_smart_routes"
+
+    api_key_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("api_keys.id", ondelete="CASCADE"), primary_key=True
+    )
+    smart_route_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("smart_routes.id", ondelete="CASCADE"), primary_key=True
+    )

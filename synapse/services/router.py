@@ -9,7 +9,7 @@ import litellm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from synapse.models import Route, Provider, UsageLog, SmartRoute, ApiKey
+from synapse.models import Route, Provider, UsageLog, SmartRoute, ApiKey, ApiKeySmartRoute
 from synapse.services.classifier import classify_intent
 
 logger = logging.getLogger("synapse.router")
@@ -231,21 +231,51 @@ class RouterEngine:
     ) -> tuple[list[dict], str, str, SmartRoute | None] | None:
         """Check if the request should use a smart route.
 
-        Priority: key-specific smart route > global trigger match.
+        Priority:
+          1. Key-specific: model name matches a SmartRoute.name assigned to this key
+          2. Global: model matches SmartRoute.trigger_model
         Returns (chain, smart_route_name, intent, smart_route_obj) or None.
         """
         smart_route = None
 
-        # 1. Check if this API key has a dedicated smart route
+        # 1. Check key-specific smart routes
         if api_key_id:
-            key = await db.get(ApiKey, api_key_id)
-            if key and key.smart_route_id:
-                sr = await db.get(SmartRoute, key.smart_route_id)
-                if sr and sr.is_enabled:
-                    smart_route = sr
+            # 1a. Match model name against assigned smart route names
+            stmt = (
+                select(SmartRoute)
+                .join(ApiKeySmartRoute, SmartRoute.id == ApiKeySmartRoute.smart_route_id)
+                .where(
+                    ApiKeySmartRoute.api_key_id == api_key_id,
+                    SmartRoute.name == model,
+                    SmartRoute.is_enabled.is_(True),
+                )
+            )
+            result = await db.execute(stmt)
+            smart_route = result.scalar_one_or_none()
+            if smart_route:
+                logger.info(
+                    f"Using key-assigned smart route '{smart_route.name}' "
+                    f"(model='{model}')"
+                )
+
+            # 1b. Backward compat: if key has exactly ONE route assigned
+            #     and model didn't match by name, use it as default
+            if not smart_route:
+                stmt = (
+                    select(SmartRoute)
+                    .join(ApiKeySmartRoute, SmartRoute.id == ApiKeySmartRoute.smart_route_id)
+                    .where(
+                        ApiKeySmartRoute.api_key_id == api_key_id,
+                        SmartRoute.is_enabled.is_(True),
+                    )
+                )
+                result = await db.execute(stmt)
+                assigned = result.scalars().all()
+                if len(assigned) == 1:
+                    smart_route = assigned[0]
                     logger.info(
-                        f"Using key-specific smart route '{sr.name}' "
-                        f"for key '{key.name}'"
+                        f"Using single assigned route '{smart_route.name}' "
+                        f"for key (compat mode)"
                     )
 
         # 2. Fall back to global trigger match
