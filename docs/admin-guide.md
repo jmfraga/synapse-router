@@ -111,15 +111,15 @@ La prioridad determina el orden en cadenas de fallback dinámicas:
 
 ## 3. Rutas Explícitas
 
-Las rutas explícitas mapean patrones de nombre de modelo a cadenas de providers específicas.
+Las rutas explícitas mapean patrones de nombre de modelo a providers específicos. Synapse **preserva el modelo original** del request — la ruta solo determina a qué provider enviarlo.
 
 ### Crear una Ruta
 
 | Campo | Descripción |
 |-------|-------------|
-| `name` | Nombre descriptivo (ej: "GPT-4 routing") |
+| `name` | Nombre descriptivo (ej: "Perplexity Direct") |
 | `model_pattern` | Patrón de matching (ver abajo) |
-| `provider_chain` | Lista ordenada de `{provider, model}` |
+| `provider_chain` | Lista ordenada de `{provider}` — el modelo del request se preserva |
 | `priority` | Orden de evaluación (menor = se evalúa primero) |
 | `is_enabled` | Activar/desactivar sin borrar |
 
@@ -128,21 +128,32 @@ Las rutas explícitas mapean patrones de nombre de modelo a cadenas de providers
 | Patrón | Ejemplo | Matchea |
 |--------|---------|---------|
 | Exacto | `gpt-4o` | Solo ese modelo |
-| Wildcard | `gpt-4*` | `gpt-4o`, `gpt-4-turbo`, etc. |
+| Wildcard | `sonar*` | `sonar-pro`, `sonar-deep-research`, etc. |
 | Global | `*` | Cualquier modelo |
 
-### Cadena de Providers
+### Cómo Funciona
 
-La cadena define el orden de intento. Ejemplo:
+La ruta define **a qué provider ir**, pero el modelo que pidió el cliente se respeta. Ejemplo:
 
-```json
-[
-  {"provider": "openai", "model": "gpt-4o"},
-  {"provider": "anthropic", "model": "claude-sonnet-4-6"}
-]
+```
+Ruta: sonar* → provider: perplexity
+
+Request: model="sonar-deep-research"
+→ Matchea sonar* → envía a perplexity/sonar-deep-research
+
+Request: model="sonar-pro"
+→ Matchea sonar* → envía a perplexity/sonar-pro
 ```
 
-→ Intenta OpenAI primero. Si falla, cae a Anthropic.
+Esto evita que Synapse intente el modelo en todos los providers (cadena dinámica), enviándolo directo al provider correcto.
+
+### Cuándo Usar Rutas Explícitas
+
+- **Modelos exclusivos de un provider** — ej: `sonar*` solo existe en Perplexity
+- **Forzar un provider específico** — ej: siempre usar Groq para ciertos modelos
+- **Evitar la cadena dinámica** — reduce errores innecesarios y latencia
+
+Para fallbacks con modelos de diferentes providers, usa **Smart Routes** con su cadena de intenciones y default chain.
 
 ### Orden de Evaluación
 

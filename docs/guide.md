@@ -103,8 +103,13 @@ Cuando envías `model: "auto"`, Synapse activa un **Smart Route**:
 2. Detecta la **intención** (medicina, coding, razonamiento, etc.)
 3. Rutea al modelo óptimo asignado a esa intención
 4. Si falla, intenta el siguiente modelo en la cadena (fallback)
+5. Si toda la cadena de la intención falla, cae al **default chain** como último recurso
 
 Cada API key puede tener un Smart Route diferente asignado, permitiendo perfiles distintos por servicio.
+
+### Modelos exclusivos de un provider
+
+Algunos modelos solo existen en un provider (ej: `sonar-pro` en Perplexity). Synapse tiene rutas explícitas que envían estos modelos directo al provider correcto, sin pasar por la cadena dinámica.
 
 ## Parámetros soportados
 

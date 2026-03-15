@@ -51,6 +51,11 @@ class RouterEngine:
         for route in routes:
             if self._matches_pattern(model, route.model_pattern):
                 chain = json.loads(route.provider_chain)
+                # Use the provider from the chain but keep the original
+                # requested model name (e.g. sonar* routes to perplexity
+                # but preserves sonar-pro vs sonar-deep-research)
+                for entry in chain:
+                    entry["model"] = model
                 return await self._resolve_chain(chain, db), "", "", None
 
         # 2. No explicit route — build dynamic chain based on provider priority
