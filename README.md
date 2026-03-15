@@ -68,9 +68,10 @@
 - Sección dedicada en admin con grabación desde micrófono y reproducción
 
 ### Arena (v0.3.0)
-- **Comparación side-by-side** de modelos de todos los providers con streaming
+- **Comparación side-by-side** de modelos de todos los providers
+- **Envío directo al provider** — bypass de routing, cada modelo va a su provider sin cadena dinámica
 - **22 presets** en 6 categorías (simple, medicine, coding, tool_use, reasoning, spanish)
-- **Métricas en tiempo real**: TTFT, tokens/s, tokens totales, tiempo, costo
+- **Métricas**: tokens/s, tokens totales, tiempo total, costo
 - **Rating 1-5** por resultado con persistencia en DB
 - **Scorecard**: ranking por modelo y categoría con gradiente de color
 - **Recomendaciones**: compara scorecard vs asignación actual de Smart Routes

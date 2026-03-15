@@ -1947,14 +1947,14 @@ async function runArenaBattle() {
     // Run local models sequentially
     for (const m of localModels) {
         status.textContent = `Ejecutando ${m.provider}/${m.model}...`;
-        await streamArenaModel(m.idx, m.provider, m.model, prompt, temp, maxTokens, key);
+        await runArenaModel(m.idx, m.provider, m.model, prompt, temp, maxTokens, key);
     }
 
     // Run cloud models in parallel
     if (cloudModels.length > 0) {
         status.textContent = `Ejecutando ${cloudModels.length} modelos cloud en paralelo...`;
         await Promise.all(cloudModels.map(m =>
-            streamArenaModel(m.idx, m.provider, m.model, prompt, temp, maxTokens, key)
+            runArenaModel(m.idx, m.provider, m.model, prompt, temp, maxTokens, key)
         ));
     }
 
@@ -1969,24 +1969,20 @@ async function runArenaBattle() {
 // Store result IDs for rating
 const arenaResultIds = {};
 
-async function streamArenaModel(idx, provider, model, prompt, temperature, maxTokens, apiKey) {
+async function runArenaModel(idx, provider, model, prompt, temperature, maxTokens, apiKey) {
     const controller = new AbortController();
     arenaAbortControllers.push(controller);
 
     const responseEl = document.getElementById(`arena-response-${idx}`);
     const tagEl = document.getElementById(`arena-tag-${idx}`);
-    tagEl.textContent = 'streaming';
+    tagEl.textContent = 'running';
     tagEl.className = 'arena-tag streaming';
-    responseEl.textContent = '';
+    responseEl.textContent = 'Esperando respuesta...';
 
     const startTime = performance.now();
-    let firstTokenTime = null;
-    let tokenCount = 0;
-    let fullText = '';
-    let usageData = null;
 
-    // Use the actual model name through Synapse API (provider/model format for litellm)
-    const requestModel = model;
+    // Send as provider:model to bypass routing and hit the provider directly
+    const requestModel = `${provider}:${model}`;
 
     try {
         const res = await fetch('/v1/chat/completions', {
@@ -1997,7 +1993,7 @@ async function streamArenaModel(idx, provider, model, prompt, temperature, maxTo
             },
             body: JSON.stringify({
                 model: requestModel,
-                stream: true,
+                stream: false,
                 temperature,
                 max_tokens: maxTokens,
                 messages: [{ role: 'user', content: prompt }],
@@ -2010,40 +2006,17 @@ async function streamArenaModel(idx, provider, model, prompt, temperature, maxTo
             throw new Error(`HTTP ${res.status}: ${err.substring(0, 200)}`);
         }
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            const text = decoder.decode(value, { stream: true });
-
-            for (const line of text.split('\n')) {
-                if (!line.startsWith('data: ') || line === 'data: [DONE]') continue;
-                try {
-                    const chunk = JSON.parse(line.slice(6));
-                    const content = chunk.choices?.[0]?.delta?.content || '';
-                    if (chunk.usage) usageData = chunk.usage;
-
-                    if (content) {
-                        if (!firstTokenTime) {
-                            firstTokenTime = performance.now();
-                            document.getElementById(`arena-ttft-${idx}`).textContent = Math.round(firstTokenTime - startTime);
-                        }
-                        fullText += content;
-                        tokenCount++;
-                        responseEl.innerHTML = renderArenaMarkdown(fullText) + '<span class="arena-streaming-cursor"></span>';
-                    }
-                } catch {}
-            }
-        }
-
+        const data = await res.json();
         const totalTimeMs = Math.round(performance.now() - startTime);
         const totalTimeSec = totalTimeMs / 1000;
-        const completionTokens = usageData?.completion_tokens || tokenCount;
-        const tps = totalTimeSec > 0 ? (completionTokens / totalTimeSec).toFixed(1) : '0';
-        const costUsd = usageData?.cost || 0;
 
+        const fullText = data.choices?.[0]?.message?.content || '';
+        const usage = data.usage || {};
+        const completionTokens = usage.completion_tokens || 0;
+        const tps = totalTimeSec > 0 ? (completionTokens / totalTimeSec).toFixed(1) : '0';
+        const costUsd = usage.cost || 0;
+
+        document.getElementById(`arena-ttft-${idx}`).textContent = totalTimeMs;
         document.getElementById(`arena-tps-${idx}`).textContent = tps;
         document.getElementById(`arena-tokens-${idx}`).textContent = completionTokens;
         document.getElementById(`arena-total-${idx}`).textContent = totalTimeSec.toFixed(1) + 's';
@@ -2058,7 +2031,7 @@ async function streamArenaModel(idx, provider, model, prompt, temperature, maxTo
             const resData = await api(`/admin/api/arena/battles/${arenaBattleId}/results`, 'POST', {
                 provider,
                 model,
-                ttft_ms: firstTokenTime ? Math.round(firstTokenTime - startTime) : 0,
+                ttft_ms: totalTimeMs,
                 tokens_per_sec: parseFloat(tps),
                 completion_tokens: completionTokens,
                 total_time_ms: totalTimeMs,

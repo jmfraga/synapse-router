@@ -33,7 +33,21 @@ class RouterEngine:
         Returns (chain, smart_route_name, intent, smart_route_obj) where chain
         is an ordered list of {provider, model, base_url, api_key} dicts.
         """
-        # 0. Check smart routes (intent-based routing)
+        # 0. Direct provider routing — format "provider:model"
+        #    Used by Arena to bypass routing and send directly to a specific provider
+        if ":" in model:
+            parts = model.split(":", 1)
+            provider_name = parts[0]
+            # Verify it's a known provider name
+            stmt = select(Provider).where(
+                Provider.name == provider_name, Provider.is_enabled.is_(True)
+            )
+            result = await db.execute(stmt)
+            if result.scalar_one_or_none():
+                chain = [{"provider": provider_name, "model": parts[1]}]
+                return await self._resolve_chain(chain, db), "", "", None
+
+        # 1. Check smart routes (intent-based routing)
         smart = await self._check_smart_route(model, messages, db, api_key_id)
         if smart is not None:
             chain, sr_name, intent, sr_obj = smart

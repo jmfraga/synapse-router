@@ -369,11 +369,15 @@ Ambos servicios son locales y sin costo ($0.00 por request).
 
 El Arena permite comparar modelos side-by-side para evaluar cuál es mejor en cada categoría.
 
+Cada modelo se envía **directo a su provider** (formato `provider:model`), sin pasar por la cadena de routing. Esto garantiza que cada modelo se ejecute exactamente donde debe, sin fallbacks ni cadena dinámica.
+
+Las respuestas se obtienen en modo **non-streaming** (respuesta completa), lo que garantiza compatibilidad con todos los modelos incluyendo los que usan razonamiento interno (thinking models).
+
 ### Flujo de Uso
 
 1. **Crear batalla** — elige un prompt (preset o custom) y categoría
-2. **Ejecutar** — envía el prompt a 2+ modelos simultáneamente con streaming
-3. **Comparar** — ve las respuestas, métricas de velocidad y costo
+2. **Ejecutar** — envía el prompt a 2+ modelos (locales secuencial, cloud en paralelo)
+3. **Comparar** — ve las respuestas completas, métricas de velocidad y costo
 4. **Calificar** — rating 1-5 por cada respuesta
 5. **Scorecard** — ranking acumulado por modelo y categoría
 
