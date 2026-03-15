@@ -225,6 +225,12 @@ curl http://localhost:8800/v1/audio/speech \
 - **whisper.cpp** — STT local (Metal/GPU)
 - **macOS say** — TTS local
 
+## Documentación
+
+- **[Guía de Integración](docs/guide.md)** — cómo conectar tu servicio a Synapse
+- **[Manual de Administración](docs/admin-guide.md)** — configuración de providers, rutas, Smart Routes, Arena, Analytics y más
+- **[Lista de Modelos](docs/models.md)** — catálogo completo de 391+ modelos disponibles
+
 ## Licencia
 
 MIT
