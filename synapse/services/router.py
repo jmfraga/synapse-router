@@ -27,17 +27,17 @@ class RouterEngine:
         self, model: str, db: AsyncSession,
         messages: list[dict] | None = None,
         api_key_id: int = 0,
-    ) -> tuple[list[dict], str, str]:
+    ) -> tuple[list[dict], str, str, SmartRoute | None]:
         """Find the best provider chain for a given model request.
 
-        Returns (chain, smart_route_name, intent) where chain is an ordered
-        list of {provider, model, base_url, api_key} dicts.
+        Returns (chain, smart_route_name, intent, smart_route_obj) where chain
+        is an ordered list of {provider, model, base_url, api_key} dicts.
         """
         # 0. Check smart routes (intent-based routing)
         smart = await self._check_smart_route(model, messages, db, api_key_id)
         if smart is not None:
-            chain, sr_name, intent = smart
-            return chain, sr_name, intent
+            chain, sr_name, intent, sr_obj = smart
+            return chain, sr_name, intent, sr_obj
 
         # 1. Check explicit routes first
         stmt = (
@@ -51,10 +51,10 @@ class RouterEngine:
         for route in routes:
             if self._matches_pattern(model, route.model_pattern):
                 chain = json.loads(route.provider_chain)
-                return await self._resolve_chain(chain, db), "", ""
+                return await self._resolve_chain(chain, db), "", "", None
 
         # 2. No explicit route — build dynamic chain based on provider priority
-        return await self._build_dynamic_chain(model, db), "", ""
+        return await self._build_dynamic_chain(model, db), "", "", None
 
     async def complete(
         self,
@@ -66,7 +66,7 @@ class RouterEngine:
         **kwargs,
     ):
         """Route a completion request through the provider chain."""
-        chain, sr_name, intent = await self.resolve_route(
+        chain, sr_name, intent, sr_obj = await self.resolve_route(
             model, db, messages=messages, api_key_id=api_key_id
         )
 
@@ -137,16 +137,83 @@ class RouterEngine:
                 )
                 continue
 
+        # Cross-layer fallback: if a smart route intent chain failed entirely,
+        # try the default chain as last resort
+        if sr_obj and intent != "default":
+            logger.warning(
+                f"All providers for intent '{intent}' failed in smart route "
+                f"'{sr_name}'. Falling back to default chain."
+            )
+            default_chain = json.loads(sr_obj.default_chain_json)
+            fallback_chain = await self._resolve_chain(default_chain, db)
+
+            for i, target in enumerate(fallback_chain):
+                try:
+                    start = time.monotonic()
+
+                    litellm_model = self._to_litellm_model(target)
+                    call_kwargs = {
+                        "model": litellm_model,
+                        "messages": messages,
+                        "stream": stream,
+                        **kwargs,
+                    }
+                    if target.get("base_url"):
+                        call_kwargs["api_base"] = target["base_url"]
+                    if target.get("api_key"):
+                        call_kwargs["api_key"] = target["api_key"]
+
+                    response = await litellm.acompletion(**call_kwargs)
+                    elapsed_ms = int((time.monotonic() - start) * 1000)
+
+                    await self._log_usage(
+                        db=db,
+                        api_key_id=api_key_id,
+                        provider=target["provider"],
+                        model=target["model"],
+                        response=response,
+                        latency_ms=elapsed_ms,
+                        status="fallback",
+                        route_path=f"{intent}(failed) -> default/{target['provider']}/{target['model']}",
+                        stream=stream,
+                        smart_route_name=sr_name,
+                        intent="default",
+                    )
+
+                    self._provider_latencies[target["provider"]] = elapsed_ms
+                    return response
+
+                except Exception as e:
+                    last_error = e
+                    logger.warning(
+                        f"Default fallback {target['provider']}/{target['model']} "
+                        f"also failed: {e}"
+                    )
+                    await self._log_usage(
+                        db=db,
+                        api_key_id=api_key_id,
+                        provider=target["provider"],
+                        model=target["model"],
+                        response=None,
+                        latency_ms=0,
+                        status="error",
+                        route_path=f"default/{target['provider']}/{target['model']}",
+                        stream=stream,
+                        smart_route_name=sr_name,
+                        intent="default",
+                    )
+                    continue
+
         raise last_error or ValueError("All providers in chain failed")
 
     async def _check_smart_route(
         self, model: str, messages: list[dict] | None, db: AsyncSession,
         api_key_id: int = 0,
-    ) -> tuple[list[dict], str, str] | None:
+    ) -> tuple[list[dict], str, str, SmartRoute | None] | None:
         """Check if the request should use a smart route.
 
         Priority: key-specific smart route > global trigger match.
-        Returns (chain, smart_route_name, intent) or None.
+        Returns (chain, smart_route_name, intent, smart_route_obj) or None.
         """
         smart_route = None
 
@@ -189,11 +256,11 @@ class RouterEngine:
         if not user_message:
             logger.warning("Smart route triggered but no user message found, using default")
             default_chain = json.loads(smart_route.default_chain_json)
-            return await self._resolve_chain(default_chain, db), sr_name, "default"
+            return await self._resolve_chain(default_chain, db), sr_name, "default", smart_route
 
         intent_name, chain = await classify_intent(user_message, smart_route, db)
         logger.info(f"Smart route '{sr_name}': intent={intent_name}")
-        return await self._resolve_chain(chain, db), sr_name, intent_name
+        return await self._resolve_chain(chain, db), sr_name, intent_name, smart_route
 
     def _matches_pattern(self, model: str, pattern: str) -> bool:
         """Check if a model name matches a route pattern. Supports * wildcard."""
