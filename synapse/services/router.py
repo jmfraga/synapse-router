@@ -5,8 +5,9 @@ import time
 import logging
 from typing import AsyncIterator
 
+import httpx
 import litellm
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from synapse.models import Route, Provider, UsageLog, SmartRoute, ApiKey, ApiKeySmartRoute
@@ -97,6 +98,28 @@ class RouterEngine:
             try:
                 start = time.monotonic()
 
+                # Ollama: bypass litellm to handle thinking models properly
+                if target["provider"].startswith("ollama"):
+                    response = await self._call_ollama(target, messages, **kwargs)
+                    elapsed_ms = int((time.monotonic() - start) * 1000)
+
+                    await self._log_usage(
+                        db=db, api_key_id=api_key_id,
+                        provider=target["provider"], model=target["model"],
+                        response=response, latency_ms=elapsed_ms,
+                        status="success" if i == 0 else "fallback",
+                        route_path=" -> ".join(
+                            f"{t['provider']}/{t['model']}" for t in chain[: i + 1]
+                        ),
+                        stream=stream, smart_route_name=sr_name, intent=intent,
+                    )
+                    self._provider_latencies[target["provider"]] = elapsed_ms
+
+                    if stream:
+                        return self._wrap_as_stream(response)
+                    return response
+
+                # All other providers: use litellm
                 litellm_model = self._to_litellm_model(target)
                 call_kwargs = {
                     "model": litellm_model,
@@ -170,19 +193,22 @@ class RouterEngine:
                 try:
                     start = time.monotonic()
 
-                    litellm_model = self._to_litellm_model(target)
-                    call_kwargs = {
-                        "model": litellm_model,
-                        "messages": messages,
-                        "stream": stream,
-                        **kwargs,
-                    }
-                    if target.get("base_url"):
-                        call_kwargs["api_base"] = target["base_url"]
-                    if target.get("api_key"):
-                        call_kwargs["api_key"] = target["api_key"]
+                    if target["provider"].startswith("ollama"):
+                        response = await self._call_ollama(target, messages, **kwargs)
+                    else:
+                        litellm_model = self._to_litellm_model(target)
+                        call_kwargs = {
+                            "model": litellm_model,
+                            "messages": messages,
+                            "stream": stream,
+                            **kwargs,
+                        }
+                        if target.get("base_url"):
+                            call_kwargs["api_base"] = target["base_url"]
+                        if target.get("api_key"):
+                            call_kwargs["api_key"] = target["api_key"]
+                        response = await litellm.acompletion(**call_kwargs)
 
-                    response = await litellm.acompletion(**call_kwargs)
                     elapsed_ms = int((time.monotonic() - start) * 1000)
 
                     await self._log_usage(
@@ -200,6 +226,9 @@ class RouterEngine:
                     )
 
                     self._provider_latencies[target["provider"]] = elapsed_ms
+
+                    if stream and target["provider"].startswith("ollama"):
+                        return self._wrap_as_stream(response)
                     return response
 
                 except Exception as e:
@@ -246,7 +275,7 @@ class RouterEngine:
                 .join(ApiKeySmartRoute, SmartRoute.id == ApiKeySmartRoute.smart_route_id)
                 .where(
                     ApiKeySmartRoute.api_key_id == api_key_id,
-                    SmartRoute.name == model,
+                    func.lower(SmartRoute.name) == model.lower(),
                     SmartRoute.is_enabled.is_(True),
                 )
             )
@@ -281,7 +310,7 @@ class RouterEngine:
         # 2. Fall back to global trigger match
         if not smart_route:
             stmt = select(SmartRoute).where(
-                SmartRoute.trigger_model == model,
+                func.lower(SmartRoute.trigger_model) == model.lower(),
                 SmartRoute.is_enabled.is_(True),
             )
             result = await db.execute(stmt)
@@ -297,10 +326,20 @@ class RouterEngine:
         if messages:
             for msg in reversed(messages):
                 if msg.get("role") == "user":
-                    content = msg.get("content", "")
-                    if isinstance(content, str):
+                    content = msg.get("content")
+                    if isinstance(content, str) and content.strip():
                         user_message = content
-                    break
+                        break
+                    elif isinstance(content, list):
+                        # Multimodal: extract text parts
+                        text_parts = [
+                            p.get("text", "") for p in content
+                            if isinstance(p, dict) and p.get("type") == "text"
+                        ]
+                        if text_parts:
+                            user_message = " ".join(text_parts)
+                            break
+                    # content is None or empty — keep searching earlier messages
 
         if not user_message:
             logger.warning("Smart route triggered but no user message found, using default")
@@ -310,6 +349,70 @@ class RouterEngine:
         intent_name, chain = await classify_intent(user_message, smart_route, db)
         logger.info(f"Smart route '{sr_name}': intent={intent_name}")
         return await self._resolve_chain(chain, db), sr_name, intent_name, smart_route
+
+    async def _call_ollama(self, target: dict, messages: list[dict], **kwargs):
+        """Call Ollama's native API directly, bypassing litellm.
+
+        Litellm can't handle 'thinking' fields from models like gpt-oss,
+        deepseek-r1, qwen3.5 — returns empty content. This calls Ollama's
+        /api/chat endpoint directly and constructs a compatible response.
+        """
+        base_url = (target.get("base_url") or "http://localhost:11434").rstrip("/")
+        body = {
+            "model": target["model"],
+            "messages": messages,
+            "stream": False,
+        }
+        if "temperature" in kwargs:
+            body.setdefault("options", {})["temperature"] = kwargs["temperature"]
+        if "max_tokens" in kwargs:
+            body.setdefault("options", {})["num_predict"] = kwargs["max_tokens"]
+        if "top_p" in kwargs:
+            body.setdefault("options", {})["top_p"] = kwargs["top_p"]
+        if "stop" in kwargs:
+            body["stop"] = kwargs["stop"]
+
+        async with httpx.AsyncClient(timeout=300) as client:
+            resp = await client.post(f"{base_url}/api/chat", json=body)
+            resp.raise_for_status()
+            data = resp.json()
+
+        msg = data.get("message", {})
+        content = msg.get("content", "")
+
+        # Build litellm-compatible response
+        return litellm.ModelResponse(
+            id=f"chatcmpl-{int(time.time())}",
+            model=f"ollama/{target['model']}",
+            choices=[{
+                "index": 0,
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+            }],
+            usage={
+                "prompt_tokens": data.get("prompt_eval_count", 0),
+                "completion_tokens": data.get("eval_count", 0),
+                "total_tokens": (data.get("prompt_eval_count", 0) + data.get("eval_count", 0)),
+            },
+        )
+
+    async def _wrap_as_stream(self, response):
+        """Wrap a non-streaming response as an async generator of SSE-compatible chunks."""
+        content = response.choices[0].message.content or ""
+        chunk_data = {
+            "id": response.id,
+            "object": "chat.completion.chunk",
+            "created": response.created,
+            "model": response.model,
+            "choices": [{
+                "index": 0,
+                "delta": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+            }],
+        }
+        from litellm import ModelResponse
+        chunk = ModelResponse(**chunk_data, stream=True)
+        yield chunk
 
     def _matches_pattern(self, model: str, pattern: str) -> bool:
         """Check if a model name matches a route pattern. Supports * wildcard."""
@@ -327,6 +430,7 @@ class RouterEngine:
 
         provider_prefixes = {
             "ollama": "ollama/",
+            "ollama-heavy": "ollama/",
             "anthropic": "anthropic/",
             "groq": "groq/",
             "nvidia": "nvidia_nim/",

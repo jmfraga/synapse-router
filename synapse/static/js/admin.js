@@ -995,10 +995,9 @@ function showSmartRouteForm() {
     const form = document.getElementById('smart-route-form');
     form.style.display = form.style.display === 'none' ? 'block' : 'none';
 
-    // Populate classifier model select if empty
-    const sel = document.getElementById('sr-classifier');
-    if (sel.options.length <= 1) {
-        populateModelSelect('sr-classifier', cachedByProvider, cachedModels);
+    // Add initial classifier chain step if none exist
+    if (document.getElementById('sr-classifier-chain').children.length === 0) {
+        addClassifierChainStep();
     }
 
     // Add initial intent if none exist
@@ -1087,6 +1086,34 @@ function removeIntentChainStep(btn) {
     }
 }
 
+function addClassifierChainStep() {
+    const container = document.getElementById('sr-classifier-chain');
+    const providerOptions = cachedProviders
+        .map(p => `<option value="${p.name}">${p.display_name}</option>`)
+        .join('');
+
+    const div = document.createElement('div');
+    div.className = 'chain-step';
+    div.innerHTML = `
+        <select class="chain-provider" onchange="onChainProviderChange(this)">
+            <option value="">-- Provider --</option>
+            ${providerOptions}
+        </select>
+        <select class="chain-model">
+            <option value="">-- Modelo --</option>
+        </select>
+        <button type="button" class="btn-small btn-danger" onclick="removeClassifierChainStep(this)">✕</button>
+    `;
+    container.appendChild(div);
+}
+
+function removeClassifierChainStep(btn) {
+    const container = document.getElementById('sr-classifier-chain');
+    if (container.children.length > 1) {
+        btn.closest('.chain-step').remove();
+    }
+}
+
 function addDefaultChainStep() {
     const container = document.getElementById('sr-default-chain');
     const providerOptions = cachedProviders
@@ -1137,7 +1164,18 @@ function editSmartRoute(id) {
     document.getElementById('sr-edit-id').value = id;
     document.getElementById('sr-name').value = data.name;
     document.getElementById('sr-trigger').value = data.trigger_model;
-    document.getElementById('sr-classifier').value = data.classifier_model;
+    // Clear and rebuild classifier chain
+    const classifierContainer = document.getElementById('sr-classifier-chain');
+    classifierContainer.innerHTML = '';
+    const classifierChain = data.classifier_chain || [];
+    for (const step of classifierChain) {
+        addClassifierChainStep();
+        const lastStep = classifierContainer.lastElementChild;
+        lastStep.querySelector('.chain-provider').value = step.provider;
+        populateSingleChainModel(lastStep.querySelector('.chain-model'), step.provider);
+        lastStep.querySelector('.chain-model').value = step.model;
+    }
+    if (classifierChain.length === 0) addClassifierChainStep();
 
     // Clear and rebuild intents
     const intentsContainer = document.getElementById('sr-intents');
@@ -1190,6 +1228,7 @@ function cancelEditSmartRoute() {
     // Reset fields
     document.getElementById('sr-name').value = '';
     document.getElementById('sr-trigger').value = 'auto';
+    document.getElementById('sr-classifier-chain').innerHTML = '';
     document.getElementById('sr-intents').innerHTML = '';
     document.getElementById('sr-default-chain').innerHTML = '';
 }
@@ -1198,10 +1237,10 @@ async function submitSmartRoute() {
     const editId = document.getElementById('sr-edit-id').value;
     const name = document.getElementById('sr-name').value.trim();
     const trigger = document.getElementById('sr-trigger').value.trim();
-    const classifier = document.getElementById('sr-classifier').value;
+    const classifierChain = readChainSteps(document.getElementById('sr-classifier-chain'));
 
-    if (!name || !trigger || !classifier) {
-        alert('Nombre, modelo trigger, y clasificador son requeridos');
+    if (!name || !trigger || classifierChain.length === 0) {
+        alert('Nombre, modelo trigger, y al menos un clasificador son requeridos');
         return;
     }
 
@@ -1221,8 +1260,10 @@ async function submitSmartRoute() {
     }
 
     const defaultChain = readChainSteps(document.getElementById('sr-default-chain'));
+    const classifier = classifierChain[0].model;
     const body = {
         name, trigger_model: trigger, classifier_model: classifier,
+        classifier_chain: classifierChain,
         intents, default_chain: defaultChain,
     };
 

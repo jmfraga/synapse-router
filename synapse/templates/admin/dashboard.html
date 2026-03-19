@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Synapse Router — Admin</title>
     <link rel="icon" type="image/png" href="/static/img/favicon-32.png">
-    <link rel="stylesheet" href="/static/css/admin.css">
+    <link rel="stylesheet" href="/static/css/admin.css?v=20260315b">
 </head>
 <body>
     <header>
@@ -269,12 +269,13 @@
                         <input id="sr-trigger" value="auto" placeholder="e.g. auto" />
                         <span class="hint">El nombre de modelo que activa este smart route</span>
                     </div>
-                    <div class="form-group">
-                        <label for="sr-classifier">Modelo clasificador</label>
-                        <select id="sr-classifier">
-                            <option value="">-- Seleccionar --</option>
-                        </select>
-                        <span class="hint">Modelo rápido y local para clasificar</span>
+                    <div class="form-group" style="flex: 0 0 100%">
+                        <label>Cadena de clasificador (con fallback)</label>
+                        <div id="sr-classifier-chain">
+                            <!-- chain steps added dynamically -->
+                        </div>
+                        <button type="button" class="btn-small" onclick="addClassifierChainStep()">+ Agregar clasificador</button>
+                        <span class="hint">Primero intenta el primer modelo; si falla, pasa al siguiente</span>
                     </div>
                 </div>
 
@@ -319,7 +320,14 @@
                     </div>
                 </div>
                 <div class="sr-detail">
-                    Clasificador: <code>{{ sr.classifier_model }}</code>
+                    Clasificador:
+                    {% if sr.classifier_chain %}
+                        {% for step in sr.classifier_chain %}
+                            <code>{{ step.provider }}/{{ step.model }}</code>{% if not loop.last %} → {% endif %}
+                        {% endfor %}
+                    {% else %}
+                        <code>{{ sr.classifier_model }}</code>
+                    {% endif %}
                 </div>
                 <div class="sr-intents-display">
                     {% for intent in sr.intents %}
@@ -735,6 +743,6 @@
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-    <script src="/static/js/admin.js"></script>
+    <script src="/static/js/admin.js?v=20260315b"></script>
 </body>
 </html>

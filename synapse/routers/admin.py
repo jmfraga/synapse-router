@@ -78,6 +78,7 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
             "description": sr.description,
             "trigger_model": sr.trigger_model,
             "classifier_model": sr.classifier_model,
+            "classifier_chain": json.loads(sr.classifier_chain_json) if sr.classifier_chain_json else [],
             "intents": intents,
             "default_chain": json.loads(sr.default_chain_json) if sr.default_chain_json else [],
             "is_enabled": sr.is_enabled,
@@ -567,7 +568,8 @@ class SmartRouteCreate(BaseModel):
     name: str
     description: str = ""
     trigger_model: str             # e.g. "auto"
-    classifier_model: str          # e.g. "llama3.1:8b"
+    classifier_model: str          # e.g. "llama3.1:8b" (backward compat)
+    classifier_chain: list[dict] = []  # [{provider, model}, ...] with fallback
     classifier_prompt: str = ""    # auto-generated if empty
     intents: list[IntentConfig]
     default_chain: list[dict]      # fallback chain
@@ -580,6 +582,7 @@ async def create_smart_route(data: SmartRouteCreate, db: AsyncSession = Depends(
         description=data.description,
         trigger_model=data.trigger_model,
         classifier_model=data.classifier_model,
+        classifier_chain_json=json.dumps(data.classifier_chain),
         classifier_prompt=data.classifier_prompt,
         intents_json=json.dumps([i.model_dump() for i in data.intents]),
         default_chain_json=json.dumps(data.default_chain),
@@ -597,6 +600,7 @@ async def list_smart_routes(db: AsyncSession = Depends(get_db)):
         {
             "id": sr.id, "name": sr.name, "description": sr.description,
             "trigger_model": sr.trigger_model, "classifier_model": sr.classifier_model,
+            "classifier_chain": json.loads(sr.classifier_chain_json or "[]"),
             "intents": json.loads(sr.intents_json),
             "default_chain": json.loads(sr.default_chain_json),
             "is_enabled": sr.is_enabled,
@@ -616,6 +620,7 @@ async def update_smart_route(
     sr.description = data.description
     sr.trigger_model = data.trigger_model
     sr.classifier_model = data.classifier_model
+    sr.classifier_chain_json = json.dumps(data.classifier_chain)
     sr.classifier_prompt = data.classifier_prompt
     sr.intents_json = json.dumps([i.model_dump() for i in data.intents])
     sr.default_chain_json = json.dumps(data.default_chain)
@@ -1007,8 +1012,9 @@ async def _fetch_models_for_provider(provider: Provider, key: str, settings) -> 
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            if name == "ollama":
-                resp = await client.get(f"{settings.ollama_base_url}/api/tags")
+            if name == "ollama" or name.startswith("ollama-"):
+                base = provider.base_url or settings.ollama_base_url
+                resp = await client.get(f"{base.rstrip('/')}/api/tags")
                 if resp.status_code == 200:
                     models = [m["name"] for m in resp.json().get("models", [])]
 

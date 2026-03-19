@@ -2,11 +2,11 @@
 
 import json
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,11 +19,13 @@ router = APIRouter()
 
 
 class Message(BaseModel):
+    model_config = ConfigDict(extra="allow")
     role: str
-    content: str
+    content: Optional[str | list] = None
 
 
 class CompletionRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
     model: str
     messages: list[Message]
     temperature: Optional[float] = None

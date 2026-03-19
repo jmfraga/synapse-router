@@ -12,7 +12,8 @@ class SmartRoute(Base):
     name: Mapped[str] = mapped_column(String(100), unique=True)  # e.g. "openclaw-smart"
     description: Mapped[str] = mapped_column(Text, default="")
     trigger_model: Mapped[str] = mapped_column(String(100), unique=True)  # e.g. "auto"
-    classifier_model: Mapped[str] = mapped_column(String(100))  # e.g. "llama3.1:8b"
+    classifier_model: Mapped[str] = mapped_column(String(100))  # e.g. "llama3.1:8b" (primary)
+    classifier_chain_json: Mapped[str] = mapped_column(Text, default="[]")  # fallback chain
     classifier_prompt: Mapped[str] = mapped_column(Text, default="")  # auto-generated if empty
     intents_json: Mapped[str] = mapped_column(Text, default="[]")
     default_chain_json: Mapped[str] = mapped_column(Text, default="[]")
