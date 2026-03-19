@@ -134,6 +134,7 @@ async def _build_classifier_chain(
             "ollama-heavy": "ollama/",
             "groq": "groq/",
             "anthropic": "anthropic/",
+            "minimax": "anthropic/",
             "nvidia": "nvidia_nim/",
             "openai": "",
             "gemini": "gemini/",

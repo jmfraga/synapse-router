@@ -437,6 +437,98 @@ option { color: var(--text); font-weight: 400; }
 .range-btn:hover { border-color: var(--accent); color: var(--text); }
 .range-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
 
+.range-separator {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    align-self: center;
+}
+
+.date-input {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 0.35rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+}
+.date-input:focus { border-color: var(--accent); }
+.date-input::-webkit-calendar-picker-indicator { filter: invert(0.7); }
+
+/* Monthly Reports */
+.report-section {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+}
+.report-section h3 {
+    font-size: 1rem;
+    margin-bottom: 0.3rem;
+}
+.report-section .section-desc {
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    margin-bottom: 1rem;
+}
+
+.report-months-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 0.6rem;
+}
+
+.report-month-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.8rem 1rem;
+    transition: border-color 0.2s;
+}
+.report-month-card:hover { border-color: var(--accent); }
+
+.report-month-info {
+    display: flex;
+    flex-direction: column;
+}
+.report-month-label {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+.report-month-stats {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+}
+
+.report-month-actions {
+    display: flex;
+    gap: 0.4rem;
+}
+
+.btn-small {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 0.3rem 0.7rem;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.78rem;
+    transition: all 0.2s;
+}
+.btn-small:hover { border-color: var(--accent); color: var(--text); }
+.btn-small:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-pdf {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+}
+.btn-pdf:hover { background: var(--accent-hover); }
+
 .analytics-cards {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

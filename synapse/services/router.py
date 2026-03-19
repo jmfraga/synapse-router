@@ -432,6 +432,7 @@ class RouterEngine:
             "ollama": "ollama/",
             "ollama-heavy": "ollama/",
             "anthropic": "anthropic/",
+            "minimax": "anthropic/",
             "groq": "groq/",
             "nvidia": "nvidia_nim/",
             "openai": "",

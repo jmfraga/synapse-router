@@ -710,8 +710,35 @@ async function loadAnalytics(days = 7) {
     document.querySelectorAll('.range-btn').forEach(btn => {
         btn.classList.toggle('active', parseInt(btn.dataset.days) === days);
     });
+    // Clear custom date inputs when using preset buttons
+    const startInput = document.getElementById('analytics-date-start');
+    const endInput = document.getElementById('analytics-date-end');
+    if (startInput) startInput.value = '';
+    if (endInput) endInput.value = '';
 
     const data = await api(`/admin/api/analytics?days=${days}`);
+    _renderAnalytics(data);
+}
+
+async function loadAnalyticsRange() {
+    const start = document.getElementById('analytics-date-start').value;
+    const end = document.getElementById('analytics-date-end').value;
+    if (!start || !end) {
+        alert('Selecciona fecha de inicio y fin');
+        return;
+    }
+    if (start > end) {
+        alert('La fecha de inicio debe ser anterior a la fecha de fin');
+        return;
+    }
+    // Deactivate preset buttons
+    document.querySelectorAll('.range-btn[data-days]').forEach(btn => btn.classList.remove('active'));
+
+    const data = await api(`/admin/api/analytics?start=${start}&end=${end}`);
+    _renderAnalytics(data);
+}
+
+function _renderAnalytics(data) {
     renderAnalyticsCards(data.summary);
     renderAnalyticsProviders(data.by_provider);
     renderAnalyticsModels(data.by_model);
@@ -921,6 +948,72 @@ function renderCostVsQuality(data) {
             <td>${d.avg_latency}ms</td><td>${rating}</td><td>${spd}</td>
         </tr>`;
     }).join('');
+}
+
+// --- Monthly Reports ---
+async function loadMonthlyReports() {
+    const data = await api('/admin/api/reports/available-months');
+    const container = document.getElementById('report-months-list');
+    if (!container) return;
+
+    if (!data.months || !data.months.length) {
+        container.innerHTML = '<p class="text-dim">No hay datos de uso aún.</p>';
+        return;
+    }
+
+    container.innerHTML = data.months.map(m => `
+        <div class="report-month-card">
+            <div class="report-month-info">
+                <span class="report-month-label">${m.label}</span>
+                <span class="report-month-stats">${m.requests.toLocaleString()} requests · $${m.cost.toFixed(4)}</span>
+            </div>
+            <div class="report-month-actions">
+                <button class="btn-small" onclick="viewMonthlyReport(${m.year}, ${m.month})">Ver</button>
+                <button class="btn-small btn-pdf" onclick="downloadMonthlyPDF(${m.year}, ${m.month}, '${m.label}')">PDF</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function viewMonthlyReport(year, month) {
+    const start = `${year}-${String(month).padStart(2, '0')}-01`;
+    const lastDay = new Date(year, month, 0).getDate();
+    const end = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+    document.getElementById('analytics-date-start').value = start;
+    document.getElementById('analytics-date-end').value = end;
+    loadAnalyticsRange();
+}
+
+async function downloadMonthlyPDF(year, month, label) {
+    const btn = event.target;
+    const originalText = btn.textContent;
+    btn.textContent = '...';
+    btn.disabled = true;
+
+    try {
+        const res = await fetch(`/admin/api/reports/monthly?year=${year}&month=${month}&format=pdf`, {
+            credentials: 'same-origin',
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || `Error ${res.status}`);
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `synapse_estado_cuenta_${year}_${String(month).padStart(2, '0')}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        alert(`Error generando PDF: ${e.message}`);
+    } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
 }
 
 // --- Playground ---
@@ -2485,7 +2578,7 @@ function navigateTo(sectionId) {
 
     // Lazy-load section data
     if (sectionId === 'dashboard') loadDashboardOverview();
-    if (sectionId === 'analytics') loadAnalytics(getCurrentAnalyticsDays());
+    if (sectionId === 'analytics') { loadAnalytics(getCurrentAnalyticsDays()); loadMonthlyReports(); }
     if (sectionId === 'arena') { loadArenaHistory(); }
     if (sectionId === 'audio') loadAudioModels();
 }

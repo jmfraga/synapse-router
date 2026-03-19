@@ -1,7 +1,9 @@
 """Admin API endpoints for managing providers, routes, and API keys."""
 
 import asyncio
+import calendar
 import datetime
+import io
 import json
 import logging
 import os
@@ -970,6 +972,12 @@ KNOWN_MODELS = {
         "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022",
         "claude-3-opus-20240229",
     ],
+    "minimax": [
+        "MiniMax-M2.7", "MiniMax-M2.7-highspeed",
+        "MiniMax-M2.5", "MiniMax-M2.5-highspeed",
+        "MiniMax-M2.1", "MiniMax-M2.1-highspeed",
+        "MiniMax-M2",
+    ],
     "perplexity": [
         "sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-reasoning",
         "sonar-deep-research",
@@ -1173,11 +1181,25 @@ async def list_services(db: AsyncSession = Depends(get_db)):
 @router.get("/api/analytics")
 async def get_analytics(
     days: int = 7,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Comprehensive analytics endpoint for the dashboard."""
+    """Comprehensive analytics endpoint for the dashboard.
+
+    Supports two modes:
+    - days=N (legacy): last N days, days=0 for all time
+    - start=YYYY-MM-DD&end=YYYY-MM-DD: custom date range
+    """
     # Date filter
-    if days > 0:
+    if start and end:
+        try:
+            start_dt = datetime.datetime.strptime(start, "%Y-%m-%d")
+            end_dt = datetime.datetime.strptime(end, "%Y-%m-%d") + datetime.timedelta(days=1)
+            date_filter = (UsageLog.created_at >= start_dt) & (UsageLog.created_at < end_dt)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Formato de fecha inválido. Usar YYYY-MM-DD")
+    elif days > 0:
         cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=days)
         date_filter = UsageLog.created_at >= cutoff
     else:
@@ -1439,6 +1461,232 @@ async def get_analytics(
         "fallback_paths": fallback_paths,
         "cost_vs_quality": cost_vs_quality,
     }
+
+
+@router.get("/api/reports/monthly")
+async def get_monthly_report(
+    year: int,
+    month: int,
+    format: str = "json",
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate monthly cost report by provider, model, and smart route.
+
+    format=json returns data, format=pdf returns a downloadable PDF.
+    """
+    if not (1 <= month <= 12):
+        raise HTTPException(status_code=400, detail="Mes inválido (1-12)")
+
+    _, last_day = calendar.monthrange(year, month)
+    start_dt = datetime.datetime(year, month, 1)
+    end_dt = datetime.datetime(year, month, last_day, 23, 59, 59)
+    date_filter = (UsageLog.created_at >= start_dt) & (UsageLog.created_at <= end_dt)
+
+    # Summary
+    summary_q = await db.execute(
+        select(
+            func.count(UsageLog.id).label("total_requests"),
+            func.coalesce(func.sum(UsageLog.cost_usd), 0).label("total_cost"),
+            func.coalesce(func.sum(UsageLog.total_tokens), 0).label("total_tokens"),
+            func.coalesce(func.sum(UsageLog.prompt_tokens), 0).label("prompt_tokens"),
+            func.coalesce(func.sum(UsageLog.completion_tokens), 0).label("completion_tokens"),
+            func.coalesce(func.avg(UsageLog.latency_ms), 0).label("avg_latency"),
+            func.sum(case((UsageLog.status == "error", 1), else_=0)).label("error_count"),
+            func.sum(case((UsageLog.status == "fallback", 1), else_=0)).label("fallback_count"),
+        ).where(date_filter)
+    )
+    s = summary_q.one()
+    summary = {
+        "total_requests": s.total_requests,
+        "total_cost": round(float(s.total_cost), 4),
+        "total_tokens": int(s.total_tokens),
+        "prompt_tokens": int(s.prompt_tokens),
+        "completion_tokens": int(s.completion_tokens),
+        "avg_latency": round(float(s.avg_latency)),
+        "error_count": int(s.error_count or 0),
+        "fallback_count": int(s.fallback_count or 0),
+    }
+
+    # By provider
+    prov_q = await db.execute(
+        select(
+            UsageLog.provider,
+            func.count(UsageLog.id).label("requests"),
+            func.coalesce(func.sum(UsageLog.total_tokens), 0).label("tokens"),
+            func.coalesce(func.sum(UsageLog.cost_usd), 0).label("cost"),
+            func.coalesce(func.avg(UsageLog.latency_ms), 0).label("avg_latency"),
+            func.coalesce(func.avg(UsageLog.cost_usd), 0).label("avg_cost"),
+        ).where(date_filter)
+        .group_by(UsageLog.provider)
+        .order_by(desc("cost"))
+    )
+    by_provider = [
+        {
+            "provider": row.provider,
+            "requests": row.requests,
+            "tokens": int(row.tokens),
+            "cost": round(float(row.cost), 4),
+            "avg_latency": round(float(row.avg_latency)),
+            "avg_cost": round(float(row.avg_cost), 6),
+            "pct": 0.0,  # filled below
+        }
+        for row in prov_q
+    ]
+    total_cost = summary["total_cost"]
+    for p in by_provider:
+        p["pct"] = round(p["cost"] / total_cost * 100, 1) if total_cost > 0 else 0.0
+
+    # By model
+    model_q = await db.execute(
+        select(
+            UsageLog.model,
+            UsageLog.provider,
+            func.count(UsageLog.id).label("requests"),
+            func.coalesce(func.sum(UsageLog.total_tokens), 0).label("tokens"),
+            func.coalesce(func.sum(UsageLog.cost_usd), 0).label("cost"),
+            func.coalesce(func.avg(UsageLog.cost_usd), 0).label("avg_cost"),
+        ).where(date_filter)
+        .group_by(UsageLog.model, UsageLog.provider)
+        .order_by(desc("cost"))
+    )
+    by_model = [
+        {
+            "model": row.model,
+            "provider": row.provider,
+            "requests": row.requests,
+            "tokens": int(row.tokens),
+            "cost": round(float(row.cost), 4),
+            "avg_cost": round(float(row.avg_cost), 6),
+            "pct": round(float(row.cost) / total_cost * 100, 1) if total_cost > 0 else 0.0,
+        }
+        for row in model_q
+    ]
+
+    # By smart route
+    route_q = await db.execute(
+        select(
+            UsageLog.smart_route_name,
+            func.count(UsageLog.id).label("requests"),
+            func.coalesce(func.sum(UsageLog.total_tokens), 0).label("tokens"),
+            func.coalesce(func.sum(UsageLog.cost_usd), 0).label("cost"),
+            func.coalesce(func.avg(UsageLog.cost_usd), 0).label("avg_cost"),
+            func.coalesce(func.avg(UsageLog.latency_ms), 0).label("avg_latency"),
+        ).where(date_filter, UsageLog.smart_route_name != "")
+        .group_by(UsageLog.smart_route_name)
+        .order_by(desc("cost"))
+    )
+    by_smart_route = [
+        {
+            "smart_route": row.smart_route_name,
+            "requests": row.requests,
+            "tokens": int(row.tokens),
+            "cost": round(float(row.cost), 4),
+            "avg_cost": round(float(row.avg_cost), 6),
+            "avg_latency": round(float(row.avg_latency)),
+            "pct": round(float(row.cost) / total_cost * 100, 1) if total_cost > 0 else 0.0,
+        }
+        for row in route_q
+    ]
+
+    # By service
+    svc_q = await db.execute(
+        select(
+            ApiKey.service,
+            func.count(UsageLog.id).label("requests"),
+            func.coalesce(func.sum(UsageLog.total_tokens), 0).label("tokens"),
+            func.coalesce(func.sum(UsageLog.cost_usd), 0).label("cost"),
+        ).join(ApiKey, UsageLog.api_key_id == ApiKey.id)
+        .where(date_filter)
+        .group_by(ApiKey.service)
+        .order_by(desc("cost"))
+    )
+    by_service = [
+        {
+            "service": row.service,
+            "requests": row.requests,
+            "tokens": int(row.tokens),
+            "cost": round(float(row.cost), 4),
+            "pct": round(float(row.cost) / total_cost * 100, 1) if total_cost > 0 else 0.0,
+        }
+        for row in svc_q
+    ]
+
+    # Daily timeline
+    timeline_q = await db.execute(
+        select(
+            func.date(UsageLog.created_at).label("date"),
+            func.count(UsageLog.id).label("requests"),
+            func.coalesce(func.sum(UsageLog.cost_usd), 0).label("cost"),
+        ).where(date_filter)
+        .group_by(func.date(UsageLog.created_at))
+        .order_by(func.date(UsageLog.created_at))
+    )
+    daily_timeline = [
+        {"date": str(row.date), "requests": row.requests, "cost": round(float(row.cost), 4)}
+        for row in timeline_q
+    ]
+
+    month_names_es = [
+        "", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+    ]
+
+    report = {
+        "year": year,
+        "month": month,
+        "month_name": month_names_es[month],
+        "period": f"1 - {last_day} de {month_names_es[month]} {year}",
+        "generated_at": datetime.datetime.utcnow().isoformat(),
+        "summary": summary,
+        "by_provider": by_provider,
+        "by_model": by_model,
+        "by_smart_route": by_smart_route,
+        "by_service": by_service,
+        "daily_timeline": daily_timeline,
+    }
+
+    if format == "pdf":
+        html = templates.get_template("admin/report_monthly.html").render(report=report)
+        import weasyprint
+        pdf_bytes = weasyprint.HTML(string=html).write_pdf()
+        filename = f"synapse_estado_cuenta_{year}_{month:02d}.pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    return report
+
+
+@router.get("/api/reports/available-months")
+async def get_available_months(db: AsyncSession = Depends(get_db)):
+    """Return list of year-month combos that have usage data."""
+    result = await db.execute(
+        select(
+            func.strftime("%Y", UsageLog.created_at).label("year"),
+            func.strftime("%m", UsageLog.created_at).label("month"),
+            func.count(UsageLog.id).label("requests"),
+            func.coalesce(func.sum(UsageLog.cost_usd), 0).label("cost"),
+        )
+        .group_by(func.strftime("%Y-%m", UsageLog.created_at))
+        .order_by(desc(func.strftime("%Y-%m", UsageLog.created_at)))
+    )
+    month_names_es = [
+        "", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+    ]
+    months = []
+    for row in result:
+        m = int(row.month)
+        months.append({
+            "year": int(row.year),
+            "month": m,
+            "label": f"{month_names_es[m]} {row.year}",
+            "requests": row.requests,
+            "cost": round(float(row.cost), 4),
+        })
+    return {"months": months}
 
 
 @router.get("/api/metrics")

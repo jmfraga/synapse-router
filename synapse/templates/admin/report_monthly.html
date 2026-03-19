@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Synapse — Estado de Cuenta {{ report.month_name }} {{ report.year }}</title>
+    <style>
+        @page {
+            size: letter;
+            margin: 2cm 1.5cm;
+            @bottom-center {
+                content: "Página " counter(page) " de " counter(pages);
+                font-size: 9px;
+                color: #888;
+            }
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+            color: #1a1a2e;
+            font-size: 11px;
+            line-height: 1.5;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            border-bottom: 3px solid #6c5ce7;
+            padding-bottom: 12px;
+            margin-bottom: 20px;
+        }
+
+        .header-left h1 {
+            font-size: 22px;
+            font-weight: 700;
+            color: #6c5ce7;
+            margin-bottom: 2px;
+        }
+
+        .header-left .subtitle {
+            font-size: 14px;
+            color: #555;
+        }
+
+        .header-right {
+            text-align: right;
+            font-size: 10px;
+            color: #888;
+        }
+
+        .header-right .period {
+            font-size: 13px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        /* Summary cards */
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 24px;
+        }
+
+        .summary-card {
+            background: #f8f9fa;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 12px;
+            text-align: center;
+        }
+
+        .summary-card .value {
+            font-size: 20px;
+            font-weight: 700;
+            color: #6c5ce7;
+            display: block;
+        }
+
+        .summary-card .value.cost { color: #00b894; }
+        .summary-card .value.warn { color: #e17055; }
+
+        .summary-card .label {
+            font-size: 9px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Section headers */
+        h2 {
+            font-size: 14px;
+            color: #6c5ce7;
+            margin: 20px 0 10px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 16px;
+            font-size: 10px;
+        }
+
+        thead th {
+            background: #6c5ce7;
+            color: white;
+            padding: 6px 8px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        thead th:first-child { border-radius: 4px 0 0 0; }
+        thead th:last-child { border-radius: 0 4px 0 0; }
+
+        tbody td {
+            padding: 5px 8px;
+            border-bottom: 1px solid #eee;
+        }
+
+        tbody tr:nth-child(even) { background: #fafafa; }
+
+        .text-right { text-align: right; }
+        .text-center { text-align: center; }
+        .text-mono { font-family: 'SF Mono', 'Menlo', monospace; font-size: 9.5px; }
+        .text-dim { color: #888; }
+        .text-bold { font-weight: 600; }
+
+        .pct-bar {
+            display: inline-block;
+            height: 6px;
+            background: #6c5ce7;
+            border-radius: 3px;
+            margin-right: 4px;
+            vertical-align: middle;
+        }
+
+        /* Footer */
+        .footer {
+            margin-top: 30px;
+            padding-top: 10px;
+            border-top: 1px solid #e0e0e0;
+            text-align: center;
+            font-size: 9px;
+            color: #aaa;
+        }
+
+        /* Daily timeline table */
+        .daily-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 4px;
+            margin-bottom: 16px;
+        }
+
+        .daily-cell {
+            background: #f8f9fa;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            padding: 4px;
+            text-align: center;
+            font-size: 9px;
+        }
+
+        .daily-cell .day { font-weight: 600; color: #333; }
+        .daily-cell .day-cost { color: #00b894; font-size: 8px; }
+        .daily-cell .day-reqs { color: #888; font-size: 8px; }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="header-left">
+            <h1>Synapse Router</h1>
+            <div class="subtitle">Estado de Cuenta Mensual</div>
+        </div>
+        <div class="header-right">
+            <div class="period">{{ report.period }}</div>
+            <div>Generado: {{ report.generated_at[:10] }}</div>
+        </div>
+    </div>
+
+    <!-- Summary -->
+    <div class="summary-grid">
+        <div class="summary-card">
+            <span class="value cost">${{ "%.4f"|format(report.summary.total_cost) }}</span>
+            <span class="label">Costo Total</span>
+        </div>
+        <div class="summary-card">
+            <span class="value">{{ "{:,}".format(report.summary.total_requests) }}</span>
+            <span class="label">Requests</span>
+        </div>
+        <div class="summary-card">
+            <span class="value">{{ "{:,}".format(report.summary.total_tokens) }}</span>
+            <span class="label">Tokens Totales</span>
+        </div>
+        <div class="summary-card">
+            <span class="value">{{ report.summary.avg_latency }}ms</span>
+            <span class="label">Latencia Promedio</span>
+        </div>
+    </div>
+
+    <div class="summary-grid">
+        <div class="summary-card">
+            <span class="value">{{ "{:,}".format(report.summary.prompt_tokens) }}</span>
+            <span class="label">Tokens Entrada</span>
+        </div>
+        <div class="summary-card">
+            <span class="value">{{ "{:,}".format(report.summary.completion_tokens) }}</span>
+            <span class="label">Tokens Salida</span>
+        </div>
+        <div class="summary-card">
+            <span class="value {{ 'warn' if report.summary.error_count > 0 else '' }}">{{ report.summary.error_count }}</span>
+            <span class="label">Errores</span>
+        </div>
+        <div class="summary-card">
+            <span class="value">{{ report.summary.fallback_count }}</span>
+            <span class="label">Fallbacks</span>
+        </div>
+    </div>
+
+    <!-- By Provider -->
+    <h2>Desglose por Provider</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Provider</th>
+                <th class="text-right">Requests</th>
+                <th class="text-right">Tokens</th>
+                <th class="text-right">Costo</th>
+                <th class="text-right">$/req</th>
+                <th class="text-right">Latencia</th>
+                <th class="text-right">% del Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in report.by_provider %}
+            <tr>
+                <td class="text-bold">{{ p.provider }}</td>
+                <td class="text-right">{{ "{:,}".format(p.requests) }}</td>
+                <td class="text-right">{{ "{:,}".format(p.tokens) }}</td>
+                <td class="text-right text-mono">${{ "%.4f"|format(p.cost) }}</td>
+                <td class="text-right text-mono">${{ "%.6f"|format(p.avg_cost) }}</td>
+                <td class="text-right">{{ p.avg_latency }}ms</td>
+                <td class="text-right">
+                    <span class="pct-bar" style="width: {{ [p.pct, 100] | min }}px"></span>
+                    {{ p.pct }}%
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not report.by_provider %}
+            <tr><td colspan="7" class="text-center text-dim">Sin datos</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+
+    <!-- By Model -->
+    <h2>Desglose por Modelo</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Modelo</th>
+                <th>Provider</th>
+                <th class="text-right">Requests</th>
+                <th class="text-right">Tokens</th>
+                <th class="text-right">Costo</th>
+                <th class="text-right">$/req</th>
+                <th class="text-right">% del Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in report.by_model %}
+            <tr>
+                <td class="text-mono">{{ m.model }}</td>
+                <td>{{ m.provider }}</td>
+                <td class="text-right">{{ "{:,}".format(m.requests) }}</td>
+                <td class="text-right">{{ "{:,}".format(m.tokens) }}</td>
+                <td class="text-right text-mono">${{ "%.4f"|format(m.cost) }}</td>
+                <td class="text-right text-mono">${{ "%.6f"|format(m.avg_cost) }}</td>
+                <td class="text-right">
+                    <span class="pct-bar" style="width: {{ [m.pct, 100] | min }}px"></span>
+                    {{ m.pct }}%
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not report.by_model %}
+            <tr><td colspan="7" class="text-center text-dim">Sin datos</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+
+    <!-- By Smart Route -->
+    <h2>Desglose por Smart Route</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Smart Route</th>
+                <th class="text-right">Requests</th>
+                <th class="text-right">Tokens</th>
+                <th class="text-right">Costo</th>
+                <th class="text-right">$/req</th>
+                <th class="text-right">Latencia</th>
+                <th class="text-right">% del Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in report.by_smart_route %}
+            <tr>
+                <td class="text-bold">{{ r.smart_route }}</td>
+                <td class="text-right">{{ "{:,}".format(r.requests) }}</td>
+                <td class="text-right">{{ "{:,}".format(r.tokens) }}</td>
+                <td class="text-right text-mono">${{ "%.4f"|format(r.cost) }}</td>
+                <td class="text-right text-mono">${{ "%.6f"|format(r.avg_cost) }}</td>
+                <td class="text-right">{{ r.avg_latency }}ms</td>
+                <td class="text-right">
+                    <span class="pct-bar" style="width: {{ [r.pct, 100] | min }}px"></span>
+                    {{ r.pct }}%
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not report.by_smart_route %}
+            <tr><td colspan="7" class="text-center text-dim">Sin datos de Smart Routes</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+
+    <!-- By Service -->
+    <h2>Desglose por Servicio</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Servicio</th>
+                <th class="text-right">Requests</th>
+                <th class="text-right">Tokens</th>
+                <th class="text-right">Costo</th>
+                <th class="text-right">% del Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in report.by_service %}
+            <tr>
+                <td class="text-bold">{{ s.service }}</td>
+                <td class="text-right">{{ "{:,}".format(s.requests) }}</td>
+                <td class="text-right">{{ "{:,}".format(s.tokens) }}</td>
+                <td class="text-right text-mono">${{ "%.4f"|format(s.cost) }}</td>
+                <td class="text-right">
+                    <span class="pct-bar" style="width: {{ [s.pct, 100] | min }}px"></span>
+                    {{ s.pct }}%
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not report.by_service %}
+            <tr><td colspan="5" class="text-center text-dim">Sin datos</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+
+    <!-- Daily Timeline -->
+    {% if report.daily_timeline %}
+    <h2>Actividad Diaria</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Fecha</th>
+                <th class="text-right">Requests</th>
+                <th class="text-right">Costo</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for d in report.daily_timeline %}
+            <tr>
+                <td>{{ d.date }}</td>
+                <td class="text-right">{{ "{:,}".format(d.requests) }}</td>
+                <td class="text-right text-mono">${{ "%.4f"|format(d.cost) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    <!-- Footer -->
+    <div class="footer">
+        Synapse Router — Estado de Cuenta generado automáticamente<br>
+        {{ report.generated_at[:10] }}
+    </div>
+</body>
+</html>

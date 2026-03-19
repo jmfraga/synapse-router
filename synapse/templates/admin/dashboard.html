@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Synapse Router — Admin</title>
     <link rel="icon" type="image/png" href="/static/img/favicon-32.png">
-    <link rel="stylesheet" href="/static/css/admin.css?v=20260315b">
+    <link rel="stylesheet" href="/static/css/admin.css?v=20260319a">
 </head>
 <body>
     <header>
@@ -659,6 +659,11 @@
                 <button class="range-btn" data-days="7" onclick="loadAnalytics(7)">7 días</button>
                 <button class="range-btn" data-days="30" onclick="loadAnalytics(30)">30 días</button>
                 <button class="range-btn" data-days="0" onclick="loadAnalytics(0)">Todo</button>
+                <span class="range-separator">|</span>
+                <input type="date" id="analytics-date-start" class="date-input" title="Fecha inicio">
+                <span class="range-separator">→</span>
+                <input type="date" id="analytics-date-end" class="date-input" title="Fecha fin">
+                <button class="range-btn" onclick="loadAnalyticsRange()">Consultar</button>
             </div>
             <div id="analytics-cards" class="analytics-cards"></div>
             <div id="analytics-timeline" class="analytics-chart-container">
@@ -707,6 +712,15 @@
                 <h3>Latencia por Provider (tendencia)</h3>
                 <canvas id="latency-timeline-chart"></canvas>
             </div>
+
+            <!-- Estados de Cuenta Mensuales -->
+            <div class="report-section">
+                <h3>Estados de Cuenta Mensuales</h3>
+                <p class="section-desc">Reportes mensuales de costos exportables en PDF (del 1 al último día del mes).</p>
+                <div id="report-months-list" class="report-months-grid">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
         </section>
 
         <!-- Playground -->
@@ -743,6 +757,6 @@
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-    <script src="/static/js/admin.js?v=20260315b"></script>
+    <script src="/static/js/admin.js?v=20260319a"></script>
 </body>
 </html>
