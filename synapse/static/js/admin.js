@@ -2447,7 +2447,7 @@ Responde ÚNICAMENTE con JSON válido (sin markdown, sin texto adicional, sin ba
                 model: judgeModel,
                 stream: false,
                 temperature: 0.0,
-                max_tokens: 500,
+                max_tokens: 2000,
                 messages: [{ role: 'user', content: judgePrompt }],
             }),
         });
@@ -2461,7 +2461,16 @@ Responde ÚNICAMENTE con JSON válido (sin markdown, sin texto adicional, sin ba
         const match = raw.match(/\{[\s\S]*\}/);
         if (!match) throw new Error('No se pudo parsear respuesta del juez');
 
-        const parsed = JSON.parse(match[0]);
+        let parsed;
+        try {
+            parsed = JSON.parse(match[0]);
+        } catch (jsonErr) {
+            // Truncated JSON fallback: extract individual rating objects
+            const ratingMatches = [...match[0].matchAll(/"index"\s*:\s*(\d+)\s*,\s*"score"\s*:\s*(\d+)\s*,\s*"reason"\s*:\s*"([^"]*)"/g)];
+            if (ratingMatches.length === 0) throw jsonErr;
+            parsed = { ratings: ratingMatches.map(m => ({ index: parseInt(m[1]), score: parseInt(m[2]), reason: m[3] })) };
+            console.warn('Auto-judge: JSON truncado, se recuperaron', parsed.ratings.length, 'ratings con fallback');
+        }
         const ratings = parsed.ratings || [];
 
         // Apply ratings
