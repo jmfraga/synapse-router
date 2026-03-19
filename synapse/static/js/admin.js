@@ -2083,32 +2083,37 @@ function filterArenaPresets(category) {
     });
 }
 
+function _populateModelSelect(sel, defaultLabel) {
+    const current = sel.value;
+    sel.innerHTML = `<option value="">${defaultLabel}</option>`;
+    for (const pg of cachedByProvider) {
+        if (!pg.configured) continue;
+        const models = pg.models_typed
+            ? pg.models_typed.filter(m => m.type === 'language').map(m => m.name)
+            : pg.models;
+        if (models.length === 0) continue;
+        const group = document.createElement('optgroup');
+        group.label = pg.display_name;
+        for (const m of models) {
+            const opt = document.createElement('option');
+            opt.value = `${pg.provider}/${m}`;
+            opt.textContent = m;
+            group.appendChild(opt);
+        }
+        sel.appendChild(group);
+    }
+    if (current) sel.value = current;
+}
+
 function populateArenaModelSelects() {
     for (let i = 1; i <= 4; i++) {
         const sel = document.getElementById(`arena-model-${i}`);
         if (!sel) continue;
-        const current = sel.value;
-        const isOptional = i > 2;
-        sel.innerHTML = isOptional ? '<option value="">-- Ninguno --</option>' : '<option value="">-- Seleccionar --</option>';
-
-        for (const pg of cachedByProvider) {
-            if (!pg.configured) continue;
-            const models = pg.models_typed
-                ? pg.models_typed.filter(m => m.type === 'language').map(m => m.name)
-                : pg.models;
-            if (models.length === 0) continue;
-            const group = document.createElement('optgroup');
-            group.label = pg.display_name;
-            for (const m of models) {
-                const opt = document.createElement('option');
-                opt.value = `${pg.provider}/${m}`;
-                opt.textContent = m;
-                group.appendChild(opt);
-            }
-            sel.appendChild(group);
-        }
-        if (current) sel.value = current;
+        _populateModelSelect(sel, i > 2 ? '-- Ninguno --' : '-- Seleccionar --');
     }
+    // Judge model dropdown
+    const judgeSel = document.getElementById('arena-judge-model');
+    if (judgeSel) _populateModelSelect(judgeSel, '-- Modelo juez --');
 }
 
 function switchArenaTab(tab) {
@@ -2163,6 +2168,8 @@ async function runArenaBattle() {
 
     document.getElementById('arena-run-btn').disabled = true;
     arenaAbortControllers = [];
+    Object.keys(arenaResponseTexts).forEach(k => delete arenaResponseTexts[k]);
+    Object.keys(arenaResultIds).forEach(k => delete arenaResultIds[k]);
 
     // Build grid
     const grid = document.getElementById('arena-grid');
@@ -2223,13 +2230,20 @@ async function runArenaBattle() {
     // Highlight winners
     highlightArenaWinners(models.length);
 
+    // Auto-judge if enabled
+    const autoJudge = document.getElementById('arena-auto-judge')?.checked;
+    if (autoJudge) {
+        await autoJudgeArenaResults(prompt, temp, maxTokens, models, key);
+    }
+
     document.getElementById('arena-run-btn').disabled = false;
-    status.textContent = 'Batalla completada';
+    if (!autoJudge) status.textContent = 'Batalla completada';
     loadArenaHistory();
 }
 
-// Store result IDs for rating
+// Store result IDs and response texts for rating/judging
 const arenaResultIds = {};
+const arenaResponseTexts = {};
 
 async function runArenaModel(idx, provider, model, prompt, temperature, maxTokens, apiKey) {
     const controller = new AbortController();
@@ -2273,6 +2287,7 @@ async function runArenaModel(idx, provider, model, prompt, temperature, maxToken
         const totalTimeSec = totalTimeMs / 1000;
 
         const fullText = data.choices?.[0]?.message?.content || '';
+        arenaResponseTexts[idx] = fullText;
         const usage = data.usage || {};
         const completionTokens = usage.completion_tokens || 0;
         const tps = totalTimeSec > 0 ? (completionTokens / totalTimeSec).toFixed(1) : '0';
@@ -2360,6 +2375,131 @@ async function rateArenaResult(panelIdx, rating) {
         const r = parseInt(btn.dataset.rating);
         btn.classList.toggle('selected', r <= rating);
     });
+}
+
+// --- Auto-Judge ---
+function toggleArenaJudge() {
+    const checked = document.getElementById('arena-auto-judge').checked;
+    document.getElementById('arena-judge-model').disabled = !checked;
+}
+
+async function autoJudgeArenaResults(prompt, temperature, maxTokens, models, apiKey) {
+    const status = document.getElementById('arena-status');
+    const judgeSelect = document.getElementById('arena-judge-model');
+    const judgeVal = judgeSelect?.value;
+    if (!judgeVal) {
+        status.textContent = 'Batalla completada — No se seleccionó modelo juez';
+        return;
+    }
+
+    status.textContent = 'Auto-Judge evaluando respuestas...';
+
+    const [judgeProvider, ...judgeModelParts] = judgeVal.split('/');
+    const judgeModel = `${judgeProvider}:${judgeModelParts.join('/')}`;
+
+    // Build response block for judge
+    let responseBlock = '';
+    const validIndices = [];
+    for (let i = 0; i < models.length; i++) {
+        const text = arenaResponseTexts[i];
+        if (!text) continue;
+        validIndices.push(i);
+        responseBlock += `\n--- RESPUESTA ${i + 1} (${models[i].provider}/${models[i].model}) ---\n${text}\n`;
+    }
+
+    if (validIndices.length === 0) {
+        status.textContent = 'Batalla completada — Sin respuestas para evaluar';
+        return;
+    }
+
+    const judgePrompt = `Eres un evaluador experto de respuestas de modelos de IA. Tu trabajo es calificar objetivamente cada respuesta.
+
+PROMPT ORIGINAL DEL USUARIO:
+${prompt}
+
+PARÁMETROS DE GENERACIÓN: temperature=${temperature}, max_tokens=${maxTokens}
+
+${responseBlock}
+---
+
+Evalúa CADA respuesta con un score ENTERO de 1 a 5 (SOLO valores 1, 2, 3, 4 o 5):
+1 = Incorrecta, irrelevante o dañina
+2 = Parcialmente relevante pero con errores importantes
+3 = Aceptable, cubre lo básico pero falta profundidad o precisión
+4 = Buena respuesta, correcta, útil y bien estructurada
+5 = Excelente, completa, precisa, bien escrita y excede expectativas
+
+Criterios: precisión factual, relevancia al prompt, calidad del español, completitud, y estructura.
+
+IMPORTANTE: El score DEBE ser un entero entre 1 y 5. No uses valores fuera de ese rango.
+
+Responde ÚNICAMENTE con JSON válido (sin markdown, sin texto adicional, sin backticks):
+{"ratings": [{"index": 1, "score": 4, "reason": "Breve justificación"}, {"index": 2, "score": 3, "reason": "Breve justificación"}]}`;
+
+    try {
+        const res = await fetch('/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+                model: judgeModel,
+                stream: false,
+                temperature: 0.0,
+                max_tokens: 500,
+                messages: [{ role: 'user', content: judgePrompt }],
+            }),
+        });
+
+        if (!res.ok) throw new Error(`Judge HTTP ${res.status}`);
+
+        const data = await res.json();
+        const raw = data.choices?.[0]?.message?.content || '';
+
+        // Parse JSON from response (handle possible markdown wrapping)
+        const match = raw.match(/\{[\s\S]*\}/);
+        if (!match) throw new Error('No se pudo parsear respuesta del juez');
+
+        const parsed = JSON.parse(match[0]);
+        const ratings = parsed.ratings || [];
+
+        // Apply ratings
+        for (const r of ratings) {
+            const idx = r.index - 1; // 1-indexed to 0-indexed
+            const score = Math.max(1, Math.min(5, Math.round(r.score)));
+            const resultId = arenaResultIds[idx];
+            if (!resultId) continue;
+
+            await api(`/admin/api/arena/results/${resultId}/rate`, 'PUT', { rating: score });
+
+            // Visual update
+            const ratingContainer = document.getElementById(`arena-rating-${idx}`);
+            if (ratingContainer) {
+                // Show judge reason as tooltip
+                const reason = r.reason || '';
+                ratingContainer.querySelectorAll('.arena-rating-btn').forEach(btn => {
+                    const btnR = parseInt(btn.dataset.rating);
+                    btn.classList.toggle('selected', btnR <= score);
+                });
+                // Add judge badge
+                let badge = ratingContainer.querySelector('.judge-badge');
+                if (!badge) {
+                    badge = document.createElement('span');
+                    badge.className = 'judge-badge';
+                    ratingContainer.appendChild(badge);
+                }
+                badge.textContent = `🤖 ${score}/5`;
+                badge.title = reason;
+            }
+        }
+
+        const judgeLabel = judgeModelParts.join('/');
+        status.textContent = `Batalla completada — Auto-Judge (${judgeLabel}) aplicado`;
+    } catch (e) {
+        console.error('Auto-judge error:', e);
+        status.textContent = `Batalla completada — Error en Auto-Judge: ${e.message}`;
+    }
 }
 
 function renderArenaMarkdown(text) {

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Synapse Router — Admin</title>
     <link rel="icon" type="image/png" href="/static/img/favicon-32.png">
-    <link rel="stylesheet" href="/static/css/admin.css?v=20260319a">
+    <link rel="stylesheet" href="/static/css/admin.css?v=20260319b">
 </head>
 <body>
     <header>
@@ -582,6 +582,19 @@
                         </div>
                     </div>
 
+                    <div class="form-row">
+                        <div class="form-group" style="max-width:180px">
+                            <label><input type="checkbox" id="arena-auto-judge" onchange="toggleArenaJudge()" /> Auto-Judge</label>
+                            <span class="hint">LLM califica respuestas 1-5</span>
+                        </div>
+                        <div class="form-group">
+                            <label for="arena-judge-model">Modelo juez</label>
+                            <select id="arena-judge-model" disabled>
+                                <option value="">-- Modelo juez --</option>
+                            </select>
+                        </div>
+                    </div>
+
                     <div id="arena-presets" class="arena-preset-chips">
                         <!-- Populated by JS -->
                     </div>
@@ -757,6 +770,6 @@
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-    <script src="/static/js/admin.js?v=20260319a"></script>
+    <script src="/static/js/admin.js?v=20260319b"></script>
 </body>
 </html>

@@ -759,6 +759,18 @@ option { color: var(--text); font-weight: 400; }
 .arena-rating-btn:hover { border-color: var(--accent); color: var(--text); }
 .arena-rating-btn.selected { border-color: var(--success); background: rgba(0, 184, 148, 0.15); color: var(--success); }
 
+.judge-badge {
+    display: inline-block;
+    margin-left: 0.5rem;
+    padding: 0.15rem 0.5rem;
+    background: rgba(108, 92, 231, 0.15);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    color: var(--accent);
+    cursor: help;
+}
+
 .arena-streaming-cursor {
     display: inline-block;
     width: 2px;
