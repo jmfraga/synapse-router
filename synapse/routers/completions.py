@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import time
 from typing import Any, Optional
 
@@ -19,6 +20,39 @@ from synapse.services.auth import authenticate
 from synapse.services.router import router_engine
 
 router = APIRouter()
+
+# ---------------------------------------------------------------------------
+# Sanitize hallucinated TTS / function_calls markup that some models inject
+# ---------------------------------------------------------------------------
+_TTS_INVOKE_RE = re.compile(
+    r'<function_calls>\s*<invoke name="tts">.*?</invoke>\s*</function_calls>',
+    re.DOTALL,
+)
+_FUNC_CALLS_RE = re.compile(r"<function_calls>.*?</function_calls>", re.DOTALL)
+_TTS_BRACKET_RE = re.compile(r"\[\[tts:[^\]]*\]\]")
+
+
+def _extract_tts_text(match: re.Match) -> str:
+    """Pull the text parameter from a hallucinated TTS function_calls block."""
+    text_m = re.search(
+        r'<parameter name="text">(.*?)</parameter>', match.group(0), re.DOTALL
+    )
+    return text_m.group(1).strip() if text_m else ""
+
+
+def sanitize_tts_markup(content: str) -> str:
+    """Strip hallucinated TTS / function_calls markup from LLM responses."""
+    if not content:
+        return content
+    # Replace TTS invoke blocks with just the extracted text
+    content = _TTS_INVOKE_RE.sub(_extract_tts_text, content)
+    # Remove remaining function_calls blocks (e.g. message/send)
+    content = _FUNC_CALLS_RE.sub("", content)
+    # Remove [[tts:...]] markers
+    content = _TTS_BRACKET_RE.sub("", content)
+    # Clean up excessive whitespace
+    content = re.sub(r"\n{3,}", "\n\n", content).strip()
+    return content
 
 
 class Message(BaseModel):
@@ -102,10 +136,13 @@ async def chat_completions(
         raise HTTPException(502, f"Provider error: {e}")
     data = response.model_dump()
     # Strip thinking/reasoning blocks — keep OpenAI-compatible format (text only)
+    # Also sanitize hallucinated TTS/function_calls markup
     for choice in data.get("choices", []):
         msg = choice.get("message") or choice.get("delta") or {}
         msg.pop("reasoning_content", None)
         msg.pop("thinking_blocks", None)
+        if isinstance(msg.get("content"), str):
+            msg["content"] = sanitize_tts_markup(msg["content"])
     # Inject cost into usage so Arena and clients can read it
     if hasattr(response, "usage") and response.usage:
         try:
@@ -142,6 +179,9 @@ async def _stream_response(
                 delta = choice.get("delta") or {}
                 delta.pop("reasoning_content", None)
                 delta.pop("thinking_blocks", None)
+                # Best-effort per-chunk sanitization for single-line TTS markers
+                if isinstance(delta.get("content"), str):
+                    delta["content"] = _TTS_BRACKET_RE.sub("", delta["content"])
             yield f"data: {json.dumps(chunk_data)}\n\n"
         yield "data: [DONE]\n\n"
     except Exception as e:
