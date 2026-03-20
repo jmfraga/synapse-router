@@ -1,8 +1,11 @@
 """OpenAI-compatible chat completions endpoint."""
 
 import json
+import logging
 import time
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -66,6 +69,16 @@ async def chat_completions(
         kwargs["top_p"] = request.top_p
     if request.stop is not None:
         kwargs["stop"] = request.stop
+    # Forward select extra fields that providers support
+    _BASE_FIELDS = {"model", "messages", "temperature", "max_tokens", "top_p", "stream", "stop"}
+    _FORWARD_FIELDS = {
+        "thinking", "reasoning", "response_format",
+        "presence_penalty", "frequency_penalty", "logprobs",
+        "top_logprobs", "n", "seed", "user",
+    }
+    for key, val in request.model_dump(exclude_none=True).items():
+        if key in _FORWARD_FIELDS and key not in kwargs:
+            kwargs[key] = val
 
     messages = [m.model_dump() for m in request.messages]
 
@@ -75,15 +88,35 @@ async def chat_completions(
             media_type="text/event-stream",
         )
 
-    response = await router_engine.complete(
-        messages=messages,
-        model=request.model,
-        db=db,
-        api_key_id=api_key.id,
-        stream=False,
-        **kwargs,
-    )
-    return response.model_dump()
+    try:
+        response = await router_engine.complete(
+            messages=messages,
+            model=request.model,
+            db=db,
+            api_key_id=api_key.id,
+            stream=False,
+            **kwargs,
+        )
+    except Exception as e:
+        logger.exception("completions error model=%s: %s", request.model, e)
+        raise HTTPException(502, f"Provider error: {e}")
+    data = response.model_dump()
+    # Strip thinking/reasoning blocks — keep OpenAI-compatible format (text only)
+    for choice in data.get("choices", []):
+        msg = choice.get("message") or choice.get("delta") or {}
+        msg.pop("reasoning_content", None)
+        msg.pop("thinking_blocks", None)
+    # Inject cost into usage so Arena and clients can read it
+    if hasattr(response, "usage") and response.usage:
+        try:
+            import litellm
+            cost = litellm.completion_cost(completion_response=response)
+            if data.get("usage") is None:
+                data["usage"] = {}
+            data["usage"]["cost"] = cost
+        except Exception as e:
+            logger.warning("completion_cost failed model=%s: %s", request.model, e)
+    return data
 
 
 async def _stream_response(
@@ -104,8 +137,12 @@ async def _stream_response(
             **kwargs,
         )
         async for chunk in response:
-            data = json.dumps(chunk.model_dump())
-            yield f"data: {data}\n\n"
+            chunk_data = chunk.model_dump()
+            for choice in chunk_data.get("choices", []):
+                delta = choice.get("delta") or {}
+                delta.pop("reasoning_content", None)
+                delta.pop("thinking_blocks", None)
+            yield f"data: {json.dumps(chunk_data)}\n\n"
         yield "data: [DONE]\n\n"
     except Exception as e:
         error = {"error": {"message": str(e), "type": "server_error"}}

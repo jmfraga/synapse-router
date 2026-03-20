@@ -18,6 +18,16 @@ class ArenaBattle(Base):
     )
 
 
+class ArenaCategory(Base):
+    __tablename__ = "arena_categories"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=datetime.datetime.utcnow
+    )
+
+
 class ArenaResult(Base):
     __tablename__ = "arena_results"
 

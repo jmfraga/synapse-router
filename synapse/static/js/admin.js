@@ -2054,6 +2054,19 @@ async function loadArenaPresets() {
         }
     }
 
+    // Populate battle category dropdown
+    const customCats = data.custom_categories || {};
+    const battleCat = document.getElementById('arena-battle-category');
+    if (battleCat) {
+        for (const cat of categories) {
+            const opt = document.createElement('option');
+            opt.value = cat;
+            opt.textContent = cat;
+            if (customCats[cat]) opt.dataset.customId = customCats[cat];
+            battleCat.appendChild(opt);
+        }
+    }
+
     // Render preset chips
     const container = document.getElementById('arena-presets');
     if (!container) return;
@@ -2070,9 +2083,60 @@ async function loadArenaPresets() {
                 document.querySelectorAll('.arena-preset-chip').forEach(c => c.classList.remove('active'));
                 chip.classList.add('active');
                 document.getElementById('arena-prompt').value = p.prompt;
+                const battleCat = document.getElementById('arena-battle-category');
+                if (battleCat) battleCat.value = p.category;
             };
             container.appendChild(chip);
         }
+    }
+}
+
+async function addArenaCategory() {
+    const name = prompt('Nombre de la nueva categoría (ej: agentic, rag, vision):');
+    if (!name || !name.trim()) return;
+    try {
+        const res = await api('/admin/api/arena/categories', 'POST', { name: name.trim() });
+        // Add to both dropdowns
+        const battleCat = document.getElementById('arena-battle-category');
+        const filterCat = document.getElementById('arena-category-filter');
+        const opt1 = document.createElement('option');
+        opt1.value = res.name;
+        opt1.textContent = res.name;
+        opt1.dataset.customId = res.id;
+        battleCat.appendChild(opt1);
+        battleCat.value = res.name;
+        if (filterCat) {
+            const opt2 = document.createElement('option');
+            opt2.value = res.name;
+            opt2.textContent = res.name;
+            filterCat.appendChild(opt2);
+        }
+    } catch (e) {
+        alert(e.message || 'Error al crear categoría');
+    }
+}
+
+async function deleteArenaCategory() {
+    const sel = document.getElementById('arena-battle-category');
+    const selected = sel.selectedOptions[0];
+    if (!selected || !selected.dataset.customId) {
+        alert('Solo se pueden eliminar categorías custom');
+        return;
+    }
+    if (!confirm(`¿Eliminar categoría "${selected.value}"?`)) return;
+    try {
+        await api(`/admin/api/arena/categories/${selected.dataset.customId}`, 'DELETE');
+        const name = selected.value;
+        selected.remove();
+        // Also remove from filter dropdown
+        const filterCat = document.getElementById('arena-category-filter');
+        if (filterCat) {
+            for (const opt of filterCat.options) {
+                if (opt.value === name) { opt.remove(); break; }
+            }
+        }
+    } catch (e) {
+        alert(e.message || 'Error al eliminar categoría');
     }
 }
 
@@ -2105,15 +2169,70 @@ function _populateModelSelect(sel, defaultLabel) {
     if (current) sel.value = current;
 }
 
+function _populateArenaProviderSelect(sel) {
+    const current = sel.value;
+    sel.innerHTML = '<option value="">-- Provider --</option>';
+    for (const pg of cachedByProvider) {
+        if (!pg.configured) continue;
+        const models = pg.models_typed
+            ? pg.models_typed.filter(m => m.type === 'language')
+            : pg.models;
+        if (models.length === 0) continue;
+        const opt = document.createElement('option');
+        opt.value = pg.provider;
+        opt.textContent = `${pg.display_name} (${models.length})`;
+        sel.appendChild(opt);
+    }
+    if (current) sel.value = current;
+}
+
+function filterArenaModels(idx) {
+    const providerSel = document.getElementById(`arena-provider-${idx}`);
+    const modelSel = document.getElementById(`arena-model-${idx}`);
+    const provider = providerSel.value;
+    const defaultLabel = idx > 2 ? '-- Ninguno --' : '-- Modelo --';
+    modelSel.innerHTML = `<option value="">${defaultLabel}</option>`;
+    if (!provider) return;
+    const pg = cachedByProvider.find(p => p.provider === provider);
+    if (!pg) return;
+    const models = pg.models_typed
+        ? pg.models_typed.filter(m => m.type === 'language').map(m => m.name)
+        : pg.models;
+    for (const m of models) {
+        const opt = document.createElement('option');
+        opt.value = `${provider}/${m}`;
+        opt.textContent = m;
+        modelSel.appendChild(opt);
+    }
+}
+
+function filterArenaJudgeModels() {
+    const providerSel = document.getElementById('arena-judge-provider');
+    const modelSel = document.getElementById('arena-judge-model');
+    const provider = providerSel.value;
+    modelSel.innerHTML = '<option value="">-- Modelo juez --</option>';
+    if (!provider) return;
+    const pg = cachedByProvider.find(p => p.provider === provider);
+    if (!pg) return;
+    const models = pg.models_typed
+        ? pg.models_typed.filter(m => m.type === 'language').map(m => m.name)
+        : pg.models;
+    for (const m of models) {
+        const opt = document.createElement('option');
+        opt.value = `${provider}/${m}`;
+        opt.textContent = m;
+        modelSel.appendChild(opt);
+    }
+}
+
 function populateArenaModelSelects() {
     for (let i = 1; i <= 4; i++) {
-        const sel = document.getElementById(`arena-model-${i}`);
-        if (!sel) continue;
-        _populateModelSelect(sel, i > 2 ? '-- Ninguno --' : '-- Seleccionar --');
+        const pSel = document.getElementById(`arena-provider-${i}`);
+        if (pSel) _populateArenaProviderSelect(pSel);
     }
-    // Judge model dropdown
-    const judgeSel = document.getElementById('arena-judge-model');
-    if (judgeSel) _populateModelSelect(judgeSel, '-- Modelo juez --');
+    // Judge provider dropdown
+    const judgeProv = document.getElementById('arena-judge-provider');
+    if (judgeProv) _populateArenaProviderSelect(judgeProv);
 }
 
 function switchArenaTab(tab) {
@@ -2156,9 +2275,8 @@ async function runArenaBattle() {
         return;
     }
 
-    // Determine category
-    const activePreset = document.querySelector('.arena-preset-chip.active');
-    const category = activePreset ? activePreset.dataset.category : 'custom';
+    // Determine category from battle dropdown
+    const category = document.getElementById('arena-battle-category')?.value || 'custom';
 
     // Create battle in DB
     const battleRes = await api('/admin/api/arena/battles', 'POST', {
@@ -2380,6 +2498,7 @@ async function rateArenaResult(panelIdx, rating) {
 // --- Auto-Judge ---
 function toggleArenaJudge() {
     const checked = document.getElementById('arena-auto-judge').checked;
+    document.getElementById('arena-judge-provider').disabled = !checked;
     document.getElementById('arena-judge-model').disabled = !checked;
 }
 
@@ -2541,6 +2660,10 @@ async function loadArenaHistory() {
     }).join('');
 }
 
+let _scorecardData = { lookup: {}, categories: [], modelKeys: [] };
+let _scorecardSortCol = null; // null = promedio, or category name
+let _scorecardSortAsc = false; // default descending (best first)
+
 async function loadArenaScorecard() {
     const minBattles = parseInt(document.getElementById('scorecard-min-battles')?.value) || 1;
     const data = await api(`/admin/api/arena/scorecard?min_battles=${minBattles}`);
@@ -2553,29 +2676,69 @@ async function loadArenaScorecard() {
     }
 
     // Build pivot: models as rows, categories as columns
-    const categories = [...new Set(data.map(r => r.category))].sort();
-    const modelKeys = [...new Set(data.map(r => `${r.provider}/${r.model}`))];
-
-    // Build lookup
-    const lookup = {};
+    _scorecardData.categories = [...new Set(data.map(r => r.category))].sort();
+    _scorecardData.modelKeys = [...new Set(data.map(r => `${r.provider}/${r.model}`))];
+    _scorecardData.lookup = {};
     for (const r of data) {
         const key = `${r.provider}/${r.model}`;
-        if (!lookup[key]) lookup[key] = {};
-        lookup[key][r.category] = r;
+        if (!_scorecardData.lookup[key]) _scorecardData.lookup[key] = {};
+        _scorecardData.lookup[key][r.category] = r;
     }
+    _scorecardSortCol = null;
+    _scorecardSortAsc = false;
+    renderArenaScorecard();
+}
 
-    // Compute overall avg for sorting
-    const modelAvgs = modelKeys.map(key => {
-        const cats = Object.values(lookup[key]);
-        const avg = cats.reduce((s, c) => s + c.avg_rating, 0) / cats.length;
-        return { key, avg };
-    }).sort((a, b) => b.avg - a.avg);
+function scorecardSortBy(col) {
+    if (_scorecardSortCol === col) {
+        _scorecardSortAsc = !_scorecardSortAsc;
+    } else {
+        _scorecardSortCol = col;
+        _scorecardSortAsc = false;
+    }
+    renderArenaScorecard();
+}
+
+function _scorecardModelAvg(key) {
+    const cats = Object.values(_scorecardData.lookup[key]);
+    const totalRating = cats.reduce((s, c) => s + c.avg_rating * c.count, 0);
+    const totalCount = cats.reduce((s, c) => s + c.count, 0);
+    return totalCount > 0 ? totalRating / totalCount : 0;
+}
+
+function _scorecardModelVal(key, col) {
+    if (col === null || col === 'promedio') return _scorecardModelAvg(key);
+    if (col === 'batallas') {
+        return Object.values(_scorecardData.lookup[key]).reduce((s, c) => s + c.count, 0);
+    }
+    const r = _scorecardData.lookup[key][col];
+    return r ? r.avg_rating : -1;
+}
+
+function renderArenaScorecard() {
+    const container = document.getElementById('scorecard-table-container');
+    const { categories, modelKeys, lookup } = _scorecardData;
+    const sortCol = _scorecardSortCol;
+    const asc = _scorecardSortAsc;
+
+    const sorted = [...modelKeys].sort((a, b) => {
+        const va = _scorecardModelVal(a, sortCol);
+        const vb = _scorecardModelVal(b, sortCol);
+        return asc ? va - vb : vb - va;
+    });
+
+    const arrow = (col) => _scorecardSortCol === col ? (_scorecardSortAsc ? ' \u25B2' : ' \u25BC') : '';
+    const thStyle = 'cursor:pointer;user-select:none';
 
     let html = `<table class="scorecard-table"><thead><tr><th>Modelo</th>`;
-    for (const cat of categories) html += `<th>${cat}</th>`;
-    html += `<th>Promedio</th><th>Batallas</th></tr></thead><tbody>`;
+    for (const cat of categories) {
+        html += `<th style="${thStyle}" onclick="scorecardSortBy('${cat}')">${cat}${arrow(cat)}</th>`;
+    }
+    html += `<th style="${thStyle}" onclick="scorecardSortBy('promedio')">Promedio${arrow('promedio')}${arrow(null)}</th>`;
+    html += `<th style="${thStyle}" onclick="scorecardSortBy('batallas')">Batallas${arrow('batallas')}</th>`;
+    html += `</tr></thead><tbody>`;
 
-    for (const { key } of modelAvgs) {
+    for (const key of sorted) {
         const row = lookup[key];
         html += `<tr><td style="text-align:left;font-weight:600">${key}</td>`;
         let totalRating = 0, totalCount = 0, totalBattles = 0;

@@ -119,4 +119,7 @@ ARENA_PRESETS = [
     },
 ]
 
-ARENA_CATEGORIES = ["simple", "medicine", "coding", "tool_use", "reasoning", "spanish"]
+ARENA_CATEGORIES = [
+    "simple", "medicine", "coding", "tool_use", "reasoning", "spanish",
+    "agentic", "creative", "analysis", "multimodal",
+]

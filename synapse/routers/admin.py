@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from synapse.config import get_settings
 from synapse.database import get_db
-from synapse.models import Provider, ApiKey, ApiKeySmartRoute, UsageLog, Route, SmartRoute, ArenaBattle, ArenaResult
+from synapse.models import Provider, ApiKey, ApiKeySmartRoute, UsageLog, Route, SmartRoute, ArenaBattle, ArenaCategory, ArenaResult
 from synapse.services.auth import hash_key
 from synapse.services.model_types import classify_model_type, filter_language_models
 from synapse.routers.audio import get_audio_models
@@ -653,13 +653,66 @@ async def toggle_smart_route(route_id: int, db: AsyncSession = Depends(get_db)):
 # --- Arena ---
 
 @router.get("/api/arena/presets")
-async def list_arena_presets():
-    """Return arena presets grouped by category."""
+async def list_arena_presets(db: AsyncSession = Depends(get_db)):
+    """Return arena presets grouped by category, including custom categories."""
     from synapse.services.arena_presets import ARENA_PRESETS, ARENA_CATEGORIES
-    by_cat = {c: [] for c in ARENA_CATEGORIES}
+    # Merge built-in + custom categories from DB
+    rows = (await db.execute(
+        select(ArenaCategory).order_by(ArenaCategory.name)
+    )).scalars().all()
+    custom_map = {r.name: r.id for r in rows if r.name not in ARENA_CATEGORIES}
+    all_categories = list(ARENA_CATEGORIES) + sorted(custom_map.keys())
+    by_cat = {c: [] for c in all_categories}
     for p in ARENA_PRESETS:
         by_cat.setdefault(p["category"], []).append(p)
-    return {"categories": ARENA_CATEGORIES, "presets": by_cat}
+    return {
+        "categories": all_categories,
+        "presets": by_cat,
+        "custom_categories": custom_map,  # {name: id} for deletable categories
+    }
+
+
+# --- Arena categories CRUD ---
+
+class ArenaCategoryCreate(BaseModel):
+    name: str
+
+
+@router.get("/api/arena/categories")
+async def list_arena_categories(db: AsyncSession = Depends(get_db)):
+    from synapse.services.arena_presets import ARENA_CATEGORIES
+    rows = (await db.execute(
+        select(ArenaCategory).order_by(ArenaCategory.name)
+    )).scalars().all()
+    custom = [{"id": r.id, "name": r.name} for r in rows]
+    return {"builtin": list(ARENA_CATEGORIES), "custom": custom}
+
+
+@router.post("/api/arena/categories")
+async def create_arena_category(data: ArenaCategoryCreate, db: AsyncSession = Depends(get_db)):
+    name = data.name.strip().lower().replace(" ", "_")
+    if not name:
+        raise HTTPException(400, "Nombre vacío")
+    existing = (await db.execute(
+        select(ArenaCategory).where(ArenaCategory.name == name)
+    )).scalar_one_or_none()
+    if existing:
+        raise HTTPException(409, f"La categoría '{name}' ya existe")
+    cat = ArenaCategory(name=name)
+    db.add(cat)
+    await db.commit()
+    await db.refresh(cat)
+    return {"status": "ok", "id": cat.id, "name": cat.name}
+
+
+@router.delete("/api/arena/categories/{cat_id}")
+async def delete_arena_category(cat_id: int, db: AsyncSession = Depends(get_db)):
+    cat = await db.get(ArenaCategory, cat_id)
+    if not cat:
+        raise HTTPException(404, "Categoría no encontrada")
+    await db.delete(cat)
+    await db.commit()
+    return {"status": "ok"}
 
 
 class ArenaBattleCreate(BaseModel):
@@ -879,10 +932,16 @@ async def arena_recommendations(
                 "count": row.count,
             }
 
+    # Enrich mapping with custom categories (auto-map: name → name)
+    custom_cats = (await db.execute(select(ArenaCategory))).scalars().all()
+    intent_map = dict(INTENT_CATEGORY_MAP)
+    for c in custom_cats:
+        intent_map.setdefault(c.name, c.name)
+
     recommendations = []
     for intent in intents:
         intent_name = intent.get("name", "").lower()
-        category = INTENT_CATEGORY_MAP.get(intent_name)
+        category = intent_map.get(intent_name)
         current_chain = intent.get("provider_chain", [])
         current = current_chain[0] if current_chain else {}
 

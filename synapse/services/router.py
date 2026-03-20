@@ -18,6 +18,8 @@ logger = logging.getLogger("synapse.router")
 # Disable litellm telemetry and reduce noise
 litellm.telemetry = False
 litellm.drop_params = True
+litellm.modify_params = True  # auto-fix incompatible params (e.g. tool_choice without tools)
+litellm.request_timeout = 120  # seconds — fallback faster on slow/stuck providers
 
 
 class RouterEngine:
@@ -121,11 +123,14 @@ class RouterEngine:
 
                 # All other providers: use litellm
                 litellm_model = self._to_litellm_model(target)
+                # Strip tool_choice if no tools provided (causes Anthropic error)
+                clean_kwargs = {k: v for k, v in kwargs.items()
+                                if not (k == "tool_choice" and "tools" not in kwargs)}
                 call_kwargs = {
                     "model": litellm_model,
                     "messages": messages,
                     "stream": stream,
-                    **kwargs,
+                    **clean_kwargs,
                 }
                 if target.get("base_url"):
                     call_kwargs["api_base"] = target["base_url"]
@@ -358,9 +363,26 @@ class RouterEngine:
         /api/chat endpoint directly and constructs a compatible response.
         """
         base_url = (target.get("base_url") or "http://localhost:11434").rstrip("/")
+        # Sanitize messages for Ollama:
+        # - Skip tool messages (unsupported role)
+        # - Convert content arrays to strings
+        # - Strip tool_calls from assistant messages
+        clean_messages = []
+        for m in messages:
+            if m.get("role") == "tool":
+                continue
+            msg = dict(m)
+            if isinstance(msg.get("content"), list):
+                msg["content"] = " ".join(
+                    p.get("text", "") for p in msg["content"]
+                    if isinstance(p, dict) and p.get("type") == "text"
+                ) or ""
+            msg.pop("tool_calls", None)
+            msg.pop("tool_call_id", None)
+            clean_messages.append(msg)
         body = {
             "model": target["model"],
-            "messages": messages,
+            "messages": clean_messages,
             "stream": False,
         }
         if "temperature" in kwargs:
@@ -372,8 +394,12 @@ class RouterEngine:
         if "stop" in kwargs:
             body["stop"] = kwargs["stop"]
 
-        async with httpx.AsyncClient(timeout=300) as client:
+        async with httpx.AsyncClient(timeout=120) as client:
             resp = await client.post(f"{base_url}/api/chat", json=body)
+            if resp.status_code >= 400:
+                logger.warning("Ollama %s/%s 400 response: %s messages_roles=%s",
+                    target["provider"], target["model"], resp.text[:300],
+                    [m.get("role") for m in messages])
             resp.raise_for_status()
             data = resp.json()
 

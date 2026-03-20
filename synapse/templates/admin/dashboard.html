@@ -540,25 +540,37 @@
 
                     <div class="form-row">
                         <div class="form-group">
-                            <label for="arena-model-1">Modelo 1</label>
+                            <label>Modelo 1</label>
+                            <select id="arena-provider-1" class="arena-provider-select" onchange="filterArenaModels(1)" style="margin-bottom:4px">
+                                <option value="">-- Provider --</option>
+                            </select>
                             <select id="arena-model-1" class="arena-model-select">
-                                <option value="">-- Seleccionar --</option>
+                                <option value="">-- Modelo --</option>
                             </select>
                         </div>
                         <div class="form-group">
-                            <label for="arena-model-2">Modelo 2</label>
+                            <label>Modelo 2</label>
+                            <select id="arena-provider-2" class="arena-provider-select" onchange="filterArenaModels(2)" style="margin-bottom:4px">
+                                <option value="">-- Provider --</option>
+                            </select>
                             <select id="arena-model-2" class="arena-model-select">
-                                <option value="">-- Seleccionar --</option>
+                                <option value="">-- Modelo --</option>
                             </select>
                         </div>
                         <div class="form-group">
-                            <label for="arena-model-3">Modelo 3 (opcional)</label>
+                            <label>Modelo 3 (opcional)</label>
+                            <select id="arena-provider-3" class="arena-provider-select" onchange="filterArenaModels(3)" style="margin-bottom:4px">
+                                <option value="">-- Provider --</option>
+                            </select>
                             <select id="arena-model-3" class="arena-model-select">
                                 <option value="">-- Ninguno --</option>
                             </select>
                         </div>
                         <div class="form-group">
-                            <label for="arena-model-4">Modelo 4 (opcional)</label>
+                            <label>Modelo 4 (opcional)</label>
+                            <select id="arena-provider-4" class="arena-provider-select" onchange="filterArenaModels(4)" style="margin-bottom:4px">
+                                <option value="">-- Provider --</option>
+                            </select>
                             <select id="arena-model-4" class="arena-model-select">
                                 <option value="">-- Ninguno --</option>
                             </select>
@@ -588,7 +600,10 @@
                             <span class="hint">LLM califica respuestas 1-5</span>
                         </div>
                         <div class="form-group">
-                            <label for="arena-judge-model">Modelo juez</label>
+                            <label>Modelo juez</label>
+                            <select id="arena-judge-provider" disabled onchange="filterArenaJudgeModels()" style="margin-bottom:4px">
+                                <option value="">-- Provider --</option>
+                            </select>
                             <select id="arena-judge-model" disabled>
                                 <option value="">-- Modelo juez --</option>
                             </select>
@@ -599,9 +614,22 @@
                         <!-- Populated by JS -->
                     </div>
 
-                    <div class="form-group" style="margin-top:0.8rem">
-                        <label for="arena-prompt">Prompt</label>
-                        <textarea id="arena-prompt" placeholder="Escribe un prompt o selecciona un preset..." rows="3"></textarea>
+                    <div class="form-row" style="margin-top:0.8rem">
+                        <div class="form-group" style="flex:1">
+                            <label for="arena-prompt">Prompt</label>
+                            <textarea id="arena-prompt" placeholder="Escribe un prompt o selecciona un preset..." rows="3"></textarea>
+                        </div>
+                        <div class="form-group" style="max-width:220px">
+                            <label for="arena-battle-category">Categoría batalla</label>
+                            <div style="display:flex;gap:4px;align-items:center">
+                                <select id="arena-battle-category" style="flex:1">
+                                    <option value="custom">custom</option>
+                                </select>
+                                <button type="button" onclick="addArenaCategory()" title="Agregar categoría" style="padding:4px 8px;font-size:1.1rem;line-height:1">+</button>
+                                <button type="button" onclick="deleteArenaCategory()" title="Eliminar categoría custom" style="padding:4px 8px;font-size:1.1rem;line-height:1;color:var(--danger,#e74c3c)">&times;</button>
+                            </div>
+                            <span class="hint">Clasifica este prompt</span>
+                        </div>
                     </div>
 
                     <div class="form-actions">
