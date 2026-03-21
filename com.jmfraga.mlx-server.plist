@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.jmfraga.mlx-server</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/jmfraga/mlx-env/bin/python3</string>
+		<string>-m</string>
+		<string>mlx_lm</string>
+		<string>server</string>
+		<string>--model</string>
+		<string>mlx-community/Meta-Llama-3.1-8B-Instruct-4bit</string>
+		<string>--host</string>
+		<string>0.0.0.0</string>
+		<string>--port</string>
+		<string>8090</string>
+		<string>--log-level</string>
+		<string>WARNING</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>/Users/jmfraga</string>
+	</dict>
+	<key>KeepAlive</key>
+	<true/>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/opt/homebrew/var/log/mlx-server.log</string>
+	<key>StandardOutPath</key>
+	<string>/opt/homebrew/var/log/mlx-server.log</string>
+	<key>WorkingDirectory</key>
+	<string>/Users/jmfraga</string>
+</dict>
+</plist>
