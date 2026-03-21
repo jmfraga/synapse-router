@@ -1,5 +1,6 @@
-"""OpenAI-compatible chat completions endpoint."""
+"""OpenAI-compatible chat completions and model listing endpoints."""
 
+import asyncio
 import json
 import logging
 import re
@@ -14,12 +15,72 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from synapse.config import get_settings
 from synapse.database import get_db
-from synapse.models import ApiKey, ApiKeySmartRoute, SmartRoute
+from synapse.models import ApiKey, ApiKeySmartRoute, Provider, SmartRoute
 from synapse.services.auth import authenticate
 from synapse.services.router import router_engine
 
 router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# /v1/models — OpenAI-compatible model listing
+# ---------------------------------------------------------------------------
+
+@router.get("/v1/models")
+async def list_models(db: AsyncSession = Depends(get_db)):
+    """Return available models in OpenAI-compatible format."""
+    from synapse.routers.admin import _fetch_models_for_provider, _get_provider_key
+
+    settings = get_settings()
+    result = await db.execute(
+        select(Provider).where(Provider.is_enabled.is_(True)).order_by(Provider.priority)
+    )
+    providers = result.scalars().all()
+
+    now = int(time.time())
+    all_model_entries = []
+
+    async def _gather_provider(provider: Provider):
+        key = _get_provider_key(provider, settings)
+        if not key and not provider.is_local:
+            return []
+        discovered = await _fetch_models_for_provider(provider, key, settings)
+        config = json.loads(provider.config_json) if provider.config_json else {}
+        custom = config.get("custom_models", [])
+        enabled = config.get("enabled_models", [])
+        all_models = sorted(set(discovered + custom))
+        if enabled:
+            enabled_set = set(enabled)
+            all_models = [m for m in all_models if m in enabled_set]
+        return [
+            {
+                "id": model_id,
+                "object": "model",
+                "created": now,
+                "owned_by": provider.name,
+            }
+            for model_id in all_models
+        ]
+
+    results = await asyncio.gather(*[_gather_provider(p) for p in providers])
+    for entries in results:
+        all_model_entries.extend(entries)
+
+    # Also add smart routes as virtual models
+    sr_result = await db.execute(
+        select(SmartRoute).where(SmartRoute.is_enabled.is_(True))
+    )
+    for sr in sr_result.scalars().all():
+        all_model_entries.append({
+            "id": sr.trigger_model or sr.name,
+            "object": "model",
+            "created": now,
+            "owned_by": "synapse",
+        })
+
+    return {"object": "list", "data": all_model_entries}
 
 # ---------------------------------------------------------------------------
 # Sanitize hallucinated TTS / function_calls markup that some models inject
@@ -109,6 +170,7 @@ async def chat_completions(
         "thinking", "reasoning", "response_format",
         "presence_penalty", "frequency_penalty", "logprobs",
         "top_logprobs", "n", "seed", "user",
+        "tools", "tool_choice",
     }
     for key, val in request.model_dump(exclude_none=True).items():
         if key in _FORWARD_FIELDS and key not in kwargs:

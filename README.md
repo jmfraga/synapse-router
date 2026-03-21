@@ -21,7 +21,8 @@
     │    Synapse Router      │
     │  (FastAPI + SQLite)    │
     │                        │
-    │  /v1/chat/completions  │  ← LLMs (391+ modelos)
+    │  /v1/models            │  ← Lista de modelos (OpenAI-compat)
+    │  /v1/chat/completions  │  ← LLMs (415+ modelos, tool-use)
     │  /v1/audio/transcriptions │  ← STT (Whisper local)
     │  /v1/audio/speech      │  ← TTS (macOS / cloud)
     │  /admin/               │  ← Panel de administración
@@ -43,8 +44,8 @@
 ## Features
 
 ### LLM Routing
-- **API compatible con OpenAI** — drop-in replacement para `/v1/chat/completions`
-- **7 providers**: Ollama (local), Groq, NVIDIA NIM, Anthropic, OpenAI, Gemini, Perplexity — **391+ modelos**
+- **API compatible con OpenAI** — drop-in replacement: `/v1/models`, `/v1/chat/completions` con tool-use/function calling
+- **9 providers**: Ollama (local), Groq, NVIDIA NIM, Anthropic, OpenAI, Gemini, Perplexity, MiniMax — **415+ modelos**
 - **Ruteo por capas** con fallback automático por prioridad de provider
 - **Smart Routes** — ruteo por intención con clasificador LLM local (llama3.1:8b)
 - **Per-key routing** — API keys vinculadas a Smart Routes para servicios especializados
@@ -188,6 +189,14 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jmfraga.whisper-serv
 
 ## API
 
+### Listar Modelos
+
+```bash
+curl http://localhost:8800/v1/models
+```
+
+Devuelve la lista completa de modelos disponibles en formato OpenAI. Incluye modelos de todos los providers habilitados y Smart Routes como modelos virtuales.
+
 ### Chat Completions
 
 ```bash
@@ -195,6 +204,19 @@ curl http://localhost:8800/v1/chat/completions \
   -H "Authorization: Bearer syn-tu-api-key" \
   -H "Content-Type: application/json" \
   -d '{"model": "auto", "messages": [{"role": "user", "content": "Hola"}]}'
+```
+
+Soporta tool-use/function calling — los parámetros `tools` y `tool_choice` se pasan transparente al provider.
+
+### Integración con OpenClaw
+
+```javascript
+import OpenAI from 'openai';
+const client = new OpenAI({
+  baseURL: 'http://<synapse-host>:8800/v1',
+  apiKey: 'syn-tu-api-key',
+});
+// Compatible con el SDK de OpenAI: models.list(), chat.completions.create() con tools
 ```
 
 ### Transcripción (STT)
