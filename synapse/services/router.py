@@ -464,6 +464,7 @@ class RouterEngine:
             "openai": "",
             "gemini": "gemini/",
             "perplexity": "perplexity/",
+            "mlx": "openai/",
         }
         prefix = provider_prefixes.get(provider, f"{provider}/")
         return f"{prefix}{model}"

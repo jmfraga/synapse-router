@@ -1069,6 +1069,7 @@ OPENAI_COMPAT_BASES = {
     "openai": "https://api.openai.com/v1",
     "nvidia": "https://integrate.api.nvidia.com/v1",
     "perplexity": "https://api.perplexity.ai",
+    "mlx": "http://localhost:8090/v1",
 }
 
 
