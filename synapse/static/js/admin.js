@@ -2921,6 +2921,66 @@ function initNavigation() {
     navigateTo(validSections.includes(hash) ? hash : 'dashboard');
 }
 
+// --- Real-time Metrics ---
+let _metricsInterval = null;
+
+async function loadMetrics() {
+    try {
+        const resp = await fetch('/metrics');
+        const data = await resp.json();
+        const s = data.summary;
+
+        // Summary cards
+        document.getElementById('m-requests').textContent = s.total_requests || 0;
+        const latMs = s.avg_latency_ms || 0;
+        const latEl = document.getElementById('m-latency');
+        latEl.textContent = latMs > 1000 ? (latMs / 1000).toFixed(1) + 's' : latMs + 'ms';
+        latEl.parentElement.className = 'metric-card' + (latMs > 10000 ? ' error' : latMs > 5000 ? ' warn' : ' ok');
+
+        const successEl = document.getElementById('m-success');
+        successEl.textContent = s.success || 0;
+        successEl.parentElement.className = 'metric-card ok';
+
+        const errEl = document.getElementById('m-errors');
+        errEl.textContent = s.errors || 0;
+        errEl.parentElement.className = 'metric-card' + ((s.errors || 0) > 0 ? ' error' : ' ok');
+
+        document.getElementById('m-routes').textContent = data.active_routes || 0;
+
+        // Uptime
+        const up = data.uptime_s || 0;
+        const h = Math.floor(up / 3600), m = Math.floor((up % 3600) / 60);
+        document.getElementById('metrics-uptime').textContent = `Uptime: ${h}h ${m}m`;
+
+        // Route health
+        const grid = document.getElementById('metrics-route-health');
+        if (data.route_health && data.route_health.length > 0) {
+            grid.innerHTML = data.route_health.map(r => {
+                const rate = r.success_rate ?? 100;
+                const dot = rate >= 95 ? 'green' : rate >= 80 ? 'yellow' : 'red';
+                const lat = r.avg_latency_ms > 1000 ? (r.avg_latency_ms / 1000).toFixed(1) + 's' : r.avg_latency_ms + 'ms';
+                return `<div class="route-health-card">
+                    <div class="route-health-dot ${dot}"></div>
+                    <div class="route-health-info">
+                        <div class="route-health-name">${r.smart_route_name}</div>
+                        <div class="route-health-stats">${r.requests} req | ${lat} | ${rate}%</div>
+                    </div>
+                </div>`;
+            }).join('');
+        } else {
+            grid.innerHTML = '<span style="color:var(--text-dim);font-size:0.85rem">Sin actividad en la última hora</span>';
+        }
+    } catch (e) {
+        console.warn('Failed to load metrics:', e);
+    }
+}
+
+function startMetricsPolling() {
+    loadMetrics();
+    if (_metricsInterval) clearInterval(_metricsInterval);
+    _metricsInterval = setInterval(loadMetrics, 30000); // refresh every 30s
+}
+
 // --- Boot ---
 document.addEventListener('DOMContentLoaded', () => {
     initNavigation();
@@ -2928,4 +2988,5 @@ document.addEventListener('DOMContentLoaded', () => {
         populateArenaModelSelects();
     });
     loadArenaPresets();
+    startMetricsPolling();
 });

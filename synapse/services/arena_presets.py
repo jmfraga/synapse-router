@@ -117,9 +117,40 @@ ARENA_PRESETS = [
         "name": "Interacciones Fármaco",
         "prompt": "Eres un farmacólogo clínico. Un paciente de 70 años polimedicado toma: metformina 850mg c/12h, enalapril 10mg c/12h, atorvastatina 40mg/noche, ácido acetilsalicílico 100mg/día, omeprazol 20mg/día, y sertralina 50mg/día. Ahora le recetan claritromicina 500mg c/12h por una infección respiratoria. Analiza todas las interacciones farmacológicas potenciales, clasifícalas por severidad, y sugiere alternativas terapéuticas si es necesario. Incluye mecanismos de interacción (CYP450, etc.). Responde en español."
     },
+    # --- OpenClaw ---
+    {
+        "category": "openclaw",
+        "name": "PM Delegación",
+        "prompt": "Eres PM, el Project Manager de un sistema multi-agente. Recibes este mensaje del usuario:\n\n'Necesito que Iris le mande un recordatorio a mi esposa por WhatsApp de la cita con el cardiólogo mañana a las 4pm, que Atlas cree una tarea en el Kanban para revisar los backups del servidor, y que CHAPPiE revise si el endpoint /api/health del gateway está respondiendo correctamente.'\n\nTienes estas herramientas:\n- sessions_send(agent_id: str, message: str) -> dict: Envía mensaje a otro agente\n- sessions_spawn(agent_id: str, task: str) -> dict: Crea subagente temporal\n- kanban_create_task(title: str, assignee: str, priority: str) -> dict: Crea tarea\n\nPlanifica la delegación: decide qué agente maneja cada solicitud, en qué orden, y genera las llamadas a herramientas en JSON. Explica brevemente tu razonamiento."
+    },
+    {
+        "category": "openclaw",
+        "name": "Iris Conversación",
+        "prompt": "Eres Iris, una asistente personal amable y eficiente que atiende por WhatsApp. El usuario te envía este audio transcrito:\n\n'Oye Iris, fíjate que ando buscando un restaurante italiano por la zona de Polanco para cenar el viernes con mi esposa, somos dos personas, algo no tan caro pero que esté bonito. Y aparte recuérdame que tengo que pasar por la farmacia a comprar el medicamento que me recetó el doctor, creo que era losartán.'\n\nResponde de forma natural, cálida y concisa (máximo 150 palabras). Separa las dos solicitudes: la del restaurante (ofrece ayuda concreta) y el recordatorio (confírmalo). Usa español mexicano coloquial pero profesional."
+    },
+    {
+        "category": "openclaw",
+        "name": "Atlas DevOps + Kanban",
+        "prompt": "Eres Atlas, agente de DevOps e infraestructura. Tienes estas herramientas:\n- kanban_list_tasks(status: str, assignee: str) -> list[dict]: Lista tareas\n- kanban_update_task(task_id: str, status: str, notes: str) -> dict: Actualiza tarea\n- shell_exec(command: str) -> dict: Ejecuta comando en servidor (solo lectura)\n- http_check(url: str, timeout: int) -> dict: Verifica endpoint\n\nRecibiste esta instrucción del PM:\n'Revisa el estado de los servicios de OpenClaw en la RPi5. Verifica que el gateway (puerto 18789), el hub (puerto 8080) y contacts (puerto 3335) estén respondiendo. Si alguno falla, crea una tarea de alta prioridad en el Kanban. Después actualiza la tarea OC-147 como completada.'\n\nMuestra tu plan paso a paso y las llamadas a herramientas en JSON."
+    },
+    {
+        "category": "openclaw",
+        "name": "Argus Log Analysis",
+        "prompt": "Eres Argus, el agente de QA y monitoreo. Analiza este fragmento de logs del gateway de OpenClaw y genera un reporte:\n\n```\n2026-04-02 02:00:01 [INFO] cron-argus: Starting daily health check\n2026-04-02 02:00:03 [OK] gateway: 18789 responding (latency: 45ms)\n2026-04-02 02:00:03 [OK] hub: 8080 responding (latency: 120ms)\n2026-04-02 02:00:04 [WARN] contacts: 3335 responding (latency: 2340ms)\n2026-04-02 02:00:05 [OK] ollama: 11434 responding, models loaded: 2\n2026-04-02 02:00:06 [ERROR] session iris-assistant: context_tokens=127450/128000 (99.6%) — CRITICAL\n2026-04-02 02:00:06 [WARN] session pm: context_tokens=98000/128000 (76.6%)\n2026-04-02 02:00:07 [OK] session atlas: context_tokens=12000/128000 (9.4%)\n2026-04-02 02:00:07 [WARN] memory-core: disk usage 89% on /home/jmfraga/.openclaw\n2026-04-02 02:00:08 [ERROR] whatsapp-channel: last_message_received=6h ago — possible disconnect\n```\n\nGenera: 1) Resumen ejecutivo, 2) Problemas críticos con prioridad, 3) Acciones recomendadas para cada problema, 4) Si alguno requiere escalamiento al owner."
+    },
+    {
+        "category": "openclaw",
+        "name": "CHAPPiE Code Review",
+        "prompt": "Eres CHAPPiE, agente desarrollador. Revisa este fragmento de código Python de un endpoint del gateway de OpenClaw y señala problemas de seguridad, rendimiento y buenas prácticas:\n\n```python\n@router.post('/api/sessions/{agent_id}/send')\nasync def send_message(agent_id: str, request: Request):\n    body = await request.json()\n    message = body['message']\n    session_file = f'/home/jmfraga/.openclaw/agents/{agent_id}/sessions/current.jsonl'\n    \n    with open(session_file, 'a') as f:\n        f.write(json.dumps({'role': 'user', 'content': message, 'ts': str(datetime.now())}) + '\\n')\n    \n    cmd = f\"cd /home/jmfraga/.openclaw && node gateway.js process {agent_id} '{message}'\"\n    result = subprocess.run(cmd, shell=True, capture_output=True, timeout=30)\n    \n    return {'status': 'ok', 'response': result.stdout.decode()}\n```\n\nSé específico: señala cada issue, explica el riesgo, y proporciona el código corregido."
+    },
+    {
+        "category": "openclaw",
+        "name": "Phoenix Estrategia",
+        "prompt": "Eres Phoenix, agente de marketing y estrategia de contenido. El usuario te dice por WhatsApp:\n\n'Phoenix, necesito que me ayudes a armar una estrategia de contenido para la cuenta de Instagram de SimAcademy. Es una academia de simulación médica en México, nuestro público son médicos residentes y estudiantes de medicina. Tenemos un presupuesto limitado y queremos crecer de 500 a 2000 seguidores en 3 meses. Dame un plan concreto con ideas de posts para las primeras 2 semanas.'\n\nResponde con un plan estructurado pero conciso. Incluye: estrategia general (3-4 líneas), calendario de las 2 semanas con tipo de contenido y copy sugerido para cada post. Usa español mexicano."
+    },
 ]
 
 ARENA_CATEGORIES = [
     "simple", "medicine", "coding", "tool_use", "reasoning", "spanish",
-    "agentic", "creative", "analysis", "multimodal",
+    "openclaw", "agentic", "creative", "analysis", "multimodal",
 ]

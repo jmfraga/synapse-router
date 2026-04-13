@@ -819,3 +819,28 @@ option { color: var(--text); font-weight: 400; }
 .recommendation-row .rec-improvement.positive { color: var(--success); }
 .recommendation-row .rec-improvement.negative { color: var(--danger); }
 .recommendation-row .rec-improvement.neutral { color: var(--text-dim); }
+
+/* Real-time Metrics */
+.metrics-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
+.metrics-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+.metrics-header h3 { font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem; }
+.metrics-badge { background: var(--accent); color: white; font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+.metrics-uptime { color: var(--text-dim); font-size: 0.85rem; }
+.metrics-summary { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+.metric-card { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; text-align: center; }
+.metric-value { display: block; font-size: 1.5rem; font-weight: 700; color: var(--text); }
+.metric-label { display: block; font-size: 0.75rem; color: var(--text-dim); margin-top: 0.25rem; }
+.metric-card.ok .metric-value { color: var(--success); }
+.metric-card.warn .metric-value { color: var(--warning); }
+.metric-card.error .metric-value { color: var(--danger); }
+.metrics-route-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem; }
+.route-health-card { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; display: flex; align-items: center; gap: 0.75rem; }
+.route-health-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.route-health-dot.green { background: var(--success); box-shadow: 0 0 6px var(--success); }
+.route-health-dot.yellow { background: var(--warning); box-shadow: 0 0 6px var(--warning); }
+.route-health-dot.red { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+.route-health-dot.gray { background: var(--text-dim); }
+.route-health-info { flex: 1; }
+.route-health-name { font-weight: 600; font-size: 0.85rem; }
+.route-health-stats { font-size: 0.75rem; color: var(--text-dim); }
+@media (max-width: 768px) { .metrics-summary { grid-template-columns: repeat(2, 1fr); } }

@@ -1,0 +1,95 @@
+# Synapse Router v2 — litellm Router configuration
+# All providers from Synapse DB, used by litellm.Router for unified routing.
+
+model_list:
+  # ─── Ollama (local, port 11434) ───
+  - model_name: "ollama/*"
+    litellm_params:
+      model: "ollama/*"
+      api_base: "http://localhost:11434"
+
+  # ─── MLX Light: Phi-4 14B (port 8087) ───
+  - model_name: "mlx-community/phi-4-4bit"
+    litellm_params:
+      model: "openai/mlx-community/phi-4-4bit"
+      api_base: "http://localhost:8087/v1"
+      api_key: "not-needed"
+
+  # ─── MLX Light: Gemma 4 E4B Vision (port 8086) ───
+  - model_name: "mlx-community/gemma-4-e4b-it-4bit"
+    litellm_params:
+      model: "openai/mlx-community/gemma-4-e4b-it-4bit"
+      api_base: "http://localhost:8086/v1"
+      api_key: "not-needed"
+
+  # ─── MLX Heavy: Nemotron 30B (port 8085) ───
+  - model_name: "mlx-community/NVIDIA-Nemotron-3-Nano-30B-A3B-4bit"
+    litellm_params:
+      model: "openai/mlx-community/NVIDIA-Nemotron-3-Nano-30B-A3B-4bit"
+      api_base: "http://localhost:8085/v1"
+      api_key: "not-needed"
+
+  # ─── MLX Heavy: Gemma 4 26B MoE (port 8091) ───
+  - model_name: "mlx-community/gemma-4-26b-a4b-it-4bit"
+    litellm_params:
+      model: "openai/mlx-community/gemma-4-26b-a4b-it-4bit"
+      api_base: "http://localhost:8091/v1"
+      api_key: "not-needed"
+
+  # ─── Anthropic ───
+  - model_name: "anthropic/*"
+    litellm_params:
+      model: "anthropic/*"
+      api_key: "os.environ/SYNAPSE_ANTHROPIC_API_KEY"
+
+  # ─── Groq ───
+  - model_name: "groq/*"
+    litellm_params:
+      model: "groq/*"
+      api_key: "os.environ/SYNAPSE_GROQ_API_KEY"
+
+  # ─── NVIDIA NIM ───
+  - model_name: "nvidia_nim/*"
+    litellm_params:
+      model: "nvidia_nim/*"
+      api_key: "os.environ/SYNAPSE_NVIDIA_API_KEY"
+
+  # ─── OpenAI ───
+  - model_name: "openai/*"
+    litellm_params:
+      model: "openai/*"
+      api_key: "os.environ/SYNAPSE_OPENAI_API_KEY"
+
+  # ─── Google Gemini ───
+  - model_name: "gemini/*"
+    litellm_params:
+      model: "gemini/*"
+      api_key: "os.environ/SYNAPSE_GEMINI_API_KEY"
+
+  # ─── Perplexity ───
+  - model_name: "perplexity/*"
+    litellm_params:
+      model: "perplexity/*"
+      api_key: "os.environ/SYNAPSE_PERPLEXITY_API_KEY"
+
+  # ─── MiniMax (via OpenAI-compatible endpoint) ───
+  - model_name: "minimax/*"
+    litellm_params:
+      model: "openai/*"
+      api_base: "https://api.minimax.io/v1"
+      api_key: "os.environ/SYNAPSE_MINIMAX_API_KEY"
+
+litellm_settings:
+  telemetry: false
+  drop_params: true
+  modify_params: true
+  request_timeout: 120
+  num_retries: 3
+
+router_settings:
+  routing_strategy: "simple-shuffle"
+  num_retries: 3
+  timeout: 120
+  retry_after: 5
+  allowed_fails: 2
+  cooldown_time: 60

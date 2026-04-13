@@ -334,14 +334,13 @@ async def test_provider(
         return {"success": False, "error": "No API key configured"}
 
     # Build litellm model string
-    from synapse.services.router import router_engine
-    target = {
-        "provider": provider.name,
-        "model": data.model,
-        "base_url": provider.base_url or "",
-        "api_key": key,
+    _prefixes = {
+        "ollama": "ollama/", "anthropic": "anthropic/", "groq": "groq/",
+        "nvidia": "nvidia_nim/", "openai": "", "gemini": "gemini/",
+        "perplexity": "perplexity/", "minimax": "openai/",
     }
-    litellm_model = router_engine._to_litellm_model(target)
+    prefix = "openai/" if provider.name.startswith("mlx") else _prefixes.get(provider.name, f"{provider.name}/")
+    litellm_model = f"{prefix}{data.model}"
 
     try:
         start = time.monotonic()
@@ -1125,6 +1124,15 @@ async def _fetch_models_for_provider(provider: Provider, key: str, settings) -> 
                             models.append(m["id"])
                     elif name in KNOWN_MODELS:
                         models = KNOWN_MODELS[name]
+
+            elif provider.is_local and provider.base_url:
+                # Local provider with OpenAI-compatible /v1/models
+                base = provider.base_url.rstrip("/")
+                url = f"{base}/models" if "/v1" in base else f"{base}/v1/models"
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    for m in resp.json().get("data", []):
+                        models.append(m["id"])
 
             elif key and name in KNOWN_MODELS:
                 # Fallback for providers without model listing API
