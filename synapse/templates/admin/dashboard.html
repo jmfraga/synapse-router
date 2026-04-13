@@ -14,7 +14,6 @@
         <nav>
             <a href="#dashboard">Dashboard</a>
             <a href="#providers">Providers</a>
-            <a href="#routes">Rutas</a>
             <a href="#keys">API Keys</a>
             <a href="#audio">Audio</a>
             <a href="#arena">Arena</a>
@@ -85,10 +84,6 @@
                             <span class="stat-value" style="font-size:1.4rem;color:var(--danger)">{{ api_keys | rejectattr('is_active') | list | length }}</span>
                             <span class="stat-label">Revocadas</span>
                         </div>
-                        <div class="dash-keys-count">
-                            <span class="stat-value" style="font-size:1.4rem">{{ routes | length }}</span>
-                            <span class="stat-label">Rutas</span>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -149,84 +144,6 @@
             <div id="provider-config-cards">
                 <!-- Populated by JS -->
             </div>
-        </section>
-
-        <!-- Routes -->
-        <section id="routes">
-            <h2>Rutas de Ruteo</h2>
-            <button onclick="showRouteForm()">+ Nueva Ruta</button>
-            <div id="route-form" style="display:none; margin: 1rem 0;">
-                <div class="form-group">
-                    <label for="route-name">Nombre</label>
-                    <input id="route-name" placeholder="e.g. gpt4-fallback" />
-                </div>
-                <div class="form-group">
-                    <label for="route-pattern">Modelo / Patrón</label>
-                    <div class="input-with-toggle">
-                        <select id="route-pattern-select">
-                            <option value="">-- Seleccionar modelo --</option>
-                        </select>
-                        <span class="toggle-link" onclick="toggleRoutePatternMode()">o escribir patrón</span>
-                        <input id="route-pattern-input" style="display:none" placeholder="e.g. gpt-4* (soporta wildcard *)" />
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Cadena de providers (en orden de prioridad)</label>
-                    <div id="route-chain-builder">
-                        <div class="chain-step" data-index="0">
-                            <select class="chain-provider">
-                                <option value="">-- Provider --</option>
-                                {% for p in providers %}
-                                <option value="{{ p.name }}">{{ p.display_name }}</option>
-                                {% endfor %}
-                            </select>
-                            <select class="chain-model">
-                                <option value="">-- Modelo --</option>
-                            </select>
-                            <button type="button" class="btn-small btn-danger" onclick="removeChainStep(this)">✕</button>
-                        </div>
-                    </div>
-                    <button type="button" class="btn-small" onclick="addChainStep()">+ Agregar provider</button>
-                </div>
-                <div class="form-group">
-                    <label for="route-priority">Prioridad</label>
-                    <input id="route-priority" type="number" value="10" min="1" max="100" style="width:80px" />
-                </div>
-                <input type="hidden" id="route-edit-id" value="" />
-                <button id="route-submit-btn" onclick="submitRoute()">Crear Ruta</button>
-                <button id="route-cancel-btn" style="display:none" class="btn-secondary" onclick="cancelEditRoute()">Cancelar</button>
-            </div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Nombre</th>
-                        <th>Patrón</th>
-                        <th>Cadena de providers</th>
-                        <th>Prioridad</th>
-                        <th>Estado</th>
-                        <th>Acciones</th>
-                    </tr>
-                </thead>
-                <tbody id="routes-body">
-                {% for r in routes %}
-                    <tr data-route='{{ r.provider_chain }}'>
-                        <td>{{ r.name }}</td>
-                        <td><code>{{ r.model_pattern }}</code></td>
-                        <td><code>{{ r.provider_chain }}</code></td>
-                        <td>{{ r.priority }}</td>
-                        <td>
-                            <span class="badge {{ 'active' if r.is_enabled else 'inactive' }}">
-                                {{ "Activo" if r.is_enabled else "Inactivo" }}
-                            </span>
-                        </td>
-                        <td>
-                            <button onclick="editRoute({{ r.id }}, '{{ r.name }}', '{{ r.model_pattern }}', {{ r.priority }})">Editar</button>
-                            <button class="btn-danger" onclick="deleteRoute({{ r.id }})">Eliminar</button>
-                        </td>
-                    </tr>
-                {% endfor %}
-                </tbody>
-            </table>
         </section>
 
         <!-- API Keys -->

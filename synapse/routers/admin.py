@@ -24,6 +24,7 @@ from synapse.database import get_db
 from synapse.models import Provider, ApiKey, ApiKeySmartRoute, UsageLog, Route, SmartRoute, ArenaBattle, ArenaCategory, ArenaResult
 from synapse.services.auth import hash_key
 from synapse.services.model_types import classify_model_type, filter_language_models
+from synapse.services.litellm_router import reload_router, get_router_status
 from synapse.routers.audio import get_audio_models
 
 logger = logging.getLogger("synapse.admin")
@@ -67,7 +68,6 @@ router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
 async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     providers = (await db.execute(select(Provider).order_by(Provider.priority))).scalars().all()
     keys = (await db.execute(select(ApiKey))).scalars().all()
-    routes = (await db.execute(select(Route).order_by(Route.priority))).scalars().all()
 
     # Usage stats
     total_requests = (await db.execute(select(func.count(UsageLog.id)))).scalar() or 0
@@ -78,7 +78,6 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         "request": request,
         "providers": providers,
         "api_keys": keys,
-        "routes": routes,
         "stats": {
             "total_requests": total_requests,
             "total_cost": round(total_cost, 4),
@@ -123,6 +122,7 @@ async def create_provider(data: ProviderCreate, db: AsyncSession = Depends(get_d
     )
     db.add(provider)
     await db.commit()
+    await reload_router(db)
     return {"status": "ok", "id": provider.id, "name": provider.name}
 
 
@@ -133,6 +133,7 @@ async def delete_provider(provider_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(404, "Provider not found")
     await db.delete(provider)
     await db.commit()
+    await reload_router(db)
     return {"status": "deleted"}
 
 
@@ -188,6 +189,7 @@ async def update_provider(
     for field, value in data.model_dump(exclude_none=True).items():
         setattr(provider, field, value)
     await db.commit()
+    await reload_router(db)
     return {"status": "ok"}
 
 
@@ -212,6 +214,7 @@ async def set_provider_key(
         provider.api_key_expires_at = None  # clear expiry when clearing key
 
     await db.commit()
+    await reload_router(db)
 
     status = "configured" if data.api_key else "cleared"
     return {"status": status, "provider": provider.display_name}
@@ -253,7 +256,64 @@ async def set_provider_models(
     config["enabled_models"] = data.enabled_models
     provider.config_json = json.dumps(config)
     await db.commit()
+    await reload_router(db)
     return {"status": "ok", "enabled_models": data.enabled_models}
+
+
+@router.get("/api/router-status")
+async def router_status():
+    """Return litellm Router status — registered models and health."""
+    return get_router_status()
+
+
+@router.post("/api/router-reload")
+async def router_reload(db: AsyncSession = Depends(get_db)):
+    """Manually trigger a litellm Router reload."""
+    await reload_router(db)
+    return get_router_status()
+
+
+@router.get("/api/provider-health")
+async def provider_health(db: AsyncSession = Depends(get_db)):
+    """Provider health analytics — latency, success rate, tokens per provider/model (last 24h)."""
+    from sqlalchemy import text
+
+    rows = await db.execute(text("""
+        SELECT provider, model,
+               COUNT(*) as requests,
+               SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) as success,
+               SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) as errors,
+               ROUND(AVG(CASE WHEN status='success' THEN latency_ms END)) as avg_latency_ms,
+               MIN(CASE WHEN status='success' THEN latency_ms END) as min_latency_ms,
+               MAX(CASE WHEN status='success' THEN latency_ms END) as max_latency_ms,
+               SUM(prompt_tokens) as total_prompt_tokens,
+               SUM(completion_tokens) as total_completion_tokens,
+               SUM(total_tokens) as total_tokens,
+               ROUND(SUM(cost_usd), 6) as total_cost_usd,
+               ROUND(AVG(CASE WHEN status='success' AND latency_ms > 0 AND completion_tokens > 0
+                   THEN 1000.0 * completion_tokens / latency_ms END), 1) as avg_tokens_per_sec,
+               MAX(created_at) as last_used
+        FROM usage_logs
+        WHERE created_at >= datetime('now', '-24 hours')
+        GROUP BY provider, model
+        ORDER BY requests DESC
+    """))
+    providers = [dict(r._mapping) for r in rows.fetchall()]
+
+    summary = await db.execute(text("""
+        SELECT provider,
+               COUNT(*) as requests,
+               ROUND(100.0 * SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) / COUNT(*), 1) as success_rate,
+               ROUND(AVG(CASE WHEN status='success' THEN latency_ms END)) as avg_latency_ms,
+               ROUND(SUM(cost_usd), 6) as total_cost_usd
+        FROM usage_logs
+        WHERE created_at >= datetime('now', '-24 hours')
+        GROUP BY provider
+        ORDER BY requests DESC
+    """))
+    by_provider = [dict(r._mapping) for r in summary.fetchall()]
+
+    return {"window": "24h", "by_model": providers, "by_provider": by_provider}
 
 
 @router.get("/api/providers/{provider_id}/discover")

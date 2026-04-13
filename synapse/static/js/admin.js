@@ -233,8 +233,7 @@ async function initDropdowns() {
     cachedByProvider = modelsData.by_provider || [];
     cachedProviders = providersData || [];
 
-    // Populate model selects with optgroups (language-only for routes/playground)
-    populateModelSelect('route-pattern-select', cachedByProvider, cachedModels, 'language');
+    // Populate model selects with optgroups (language-only for playground)
     populateModelSelect('pg-model', cachedByProvider, cachedModels, 'language');
 
     // Multi-select for API key allowed models
@@ -273,52 +272,11 @@ async function initDropdowns() {
         });
     }
 
-    // Populate chain-model selects in route builder
-    populateChainModelSelects();
-
     // Render provider configuration cards
     renderProviderConfigCards();
 
     // Render key expiry alerts
     renderKeyExpiryAlerts();
-}
-
-function populateChainModelSelects() {
-    document.querySelectorAll('.chain-model').forEach(sel => {
-        const current = sel.value;
-        while (sel.options.length > 1) sel.remove(1);
-
-        if (cachedByProvider.length > 0) {
-            for (const pg of cachedByProvider) {
-                // Only show language models in chain selects
-                let models = pg.models;
-                if (pg.models_typed) {
-                    models = pg.models_typed
-                        .filter(m => m.type === 'language')
-                        .map(m => m.name);
-                }
-                if (models.length === 0) continue;
-                const group = document.createElement('optgroup');
-                group.label = pg.display_name;
-                for (const m of models) {
-                    const opt = document.createElement('option');
-                    opt.value = m;
-                    opt.textContent = m;
-                    group.appendChild(opt);
-                }
-                sel.appendChild(group);
-            }
-        } else {
-            for (const m of cachedModels) {
-                const opt = document.createElement('option');
-                opt.value = m;
-                opt.textContent = m;
-                sel.appendChild(opt);
-            }
-        }
-
-        if (current) sel.value = current;
-    });
 }
 
 // --- Providers ---
@@ -360,192 +318,6 @@ async function deleteProvider(id, name) {
 
 async function updateProviderPriority(id, priority) {
     await api(`/admin/api/providers/${id}`, 'PUT', { priority: parseInt(priority) });
-}
-
-// --- Routes ---
-function showRouteForm() {
-    const form = document.getElementById('route-form');
-    form.style.display = form.style.display === 'none' ? 'block' : 'none';
-}
-
-function toggleRoutePatternMode() {
-    const sel = document.getElementById('route-pattern-select');
-    const inp = document.getElementById('route-pattern-input');
-    const link = sel.parentElement.querySelector('.toggle-link');
-
-    if (sel.style.display === 'none') {
-        sel.style.display = '';
-        inp.style.display = 'none';
-        inp.value = '';
-        link.textContent = 'o escribir patrón';
-    } else {
-        sel.style.display = 'none';
-        inp.style.display = '';
-        link.textContent = 'o seleccionar modelo';
-    }
-}
-
-function addChainStep() {
-    const builder = document.getElementById('route-chain-builder');
-    const index = builder.children.length;
-
-    const providerOptions = cachedProviders
-        .map(p => `<option value="${p.name}">${p.display_name}</option>`)
-        .join('');
-
-    const div = document.createElement('div');
-    div.className = 'chain-step';
-    div.dataset.index = index;
-    div.innerHTML = `
-        <select class="chain-provider" onchange="onChainProviderChange(this)">
-            <option value="">-- Provider --</option>
-            ${providerOptions}
-        </select>
-        <select class="chain-model">
-            <option value="">-- Modelo --</option>
-        </select>
-        <button type="button" class="btn-small btn-danger" onclick="removeChainStep(this)">✕</button>
-    `;
-    builder.appendChild(div);
-}
-
-function populateSingleChainModel(sel, filterProvider = '') {
-    // Clear existing options beyond the placeholder
-    while (sel.options.length > 1) sel.remove(1);
-    // Remove existing optgroups
-    sel.querySelectorAll('optgroup').forEach(g => g.remove());
-
-    if (cachedByProvider.length > 0) {
-        for (const pg of cachedByProvider) {
-            // Filter by provider if specified
-            if (filterProvider && pg.provider !== filterProvider) continue;
-            // Only show language models in chain selects
-            let models = pg.models;
-            if (pg.models_typed) {
-                models = pg.models_typed
-                    .filter(m => m.type === 'language')
-                    .map(m => m.name);
-            }
-            if (models.length === 0) continue;
-            const group = document.createElement('optgroup');
-            group.label = pg.display_name;
-            for (const m of models) {
-                const opt = document.createElement('option');
-                opt.value = m;
-                opt.textContent = m;
-                group.appendChild(opt);
-            }
-            sel.appendChild(group);
-        }
-    }
-}
-
-function onChainProviderChange(providerSel) {
-    const modelSel = providerSel.closest('.chain-step').querySelector('.chain-model');
-    populateSingleChainModel(modelSel, providerSel.value);
-}
-
-function removeChainStep(btn) {
-    const builder = document.getElementById('route-chain-builder');
-    if (builder.children.length > 1) {
-        btn.closest('.chain-step').remove();
-    }
-}
-
-function editRoute(id, name, pattern, priority) {
-    // Show form and populate
-    document.getElementById('route-form').style.display = 'block';
-    document.getElementById('route-edit-id').value = id;
-    document.getElementById('route-name').value = name;
-    document.getElementById('route-priority').value = priority;
-
-    // Set pattern — use input mode for existing routes
-    document.getElementById('route-pattern-select').style.display = 'none';
-    const inp = document.getElementById('route-pattern-input');
-    inp.style.display = '';
-    inp.value = pattern;
-    const link = inp.parentElement.querySelector('.toggle-link');
-    if (link) link.textContent = 'o seleccionar modelo';
-
-    // Populate chain from the table row's data attribute
-    const row = document.querySelector(`tr[data-route]`);
-    // Find the correct row by matching the id in the edit button
-    const rows = document.querySelectorAll('#routes-body tr');
-    let chainData = [];
-    rows.forEach(r => {
-        const editBtn = r.querySelector('button');
-        if (editBtn && editBtn.getAttribute('onclick')?.includes(`editRoute(${id},`)) {
-            try { chainData = JSON.parse(r.dataset.route); } catch {}
-        }
-    });
-
-    // Rebuild chain steps
-    const builder = document.getElementById('route-chain-builder');
-    builder.innerHTML = '';
-    if (chainData.length > 0) {
-        for (const step of chainData) {
-            addChainStep();
-            const lastStep = builder.lastElementChild;
-            lastStep.querySelector('.chain-provider').value = step.provider;
-            populateSingleChainModel(lastStep.querySelector('.chain-model'), step.provider);
-            lastStep.querySelector('.chain-model').value = step.model;
-        }
-    } else {
-        addChainStep();
-    }
-
-    // Update button
-    document.getElementById('route-submit-btn').textContent = 'Guardar Ruta';
-    document.getElementById('route-cancel-btn').style.display = '';
-
-    // Scroll to form
-    document.getElementById('route-form').scrollIntoView({ behavior: 'smooth' });
-}
-
-function cancelEditRoute() {
-    document.getElementById('route-edit-id').value = '';
-    document.getElementById('route-form').style.display = 'none';
-    document.getElementById('route-submit-btn').textContent = 'Crear Ruta';
-    document.getElementById('route-cancel-btn').style.display = 'none';
-    // Reset fields
-    document.getElementById('route-name').value = '';
-    document.getElementById('route-priority').value = '10';
-}
-
-async function submitRoute() {
-    const editId = document.getElementById('route-edit-id').value;
-    const name = document.getElementById('route-name').value.trim();
-
-    const sel = document.getElementById('route-pattern-select');
-    const inp = document.getElementById('route-pattern-input');
-    const pattern = sel.style.display === 'none' ? inp.value.trim() : sel.value;
-
-    if (!name || !pattern) {
-        alert('Nombre y modelo/patrón son requeridos');
-        return;
-    }
-
-    const chain = readChainSteps(document.getElementById('route-chain-builder'));
-    if (chain.length === 0) {
-        alert('Agrega al menos un provider a la cadena');
-        return;
-    }
-
-    const priority = parseInt(document.getElementById('route-priority').value) || 10;
-    const body = { name, model_pattern: pattern, provider_chain: chain, priority };
-
-    if (editId) {
-        await api(`/admin/api/routes/${editId}`, 'PUT', body);
-    } else {
-        await api('/admin/api/routes', 'POST', body);
-    }
-    location.reload();
-}
-
-async function deleteRoute(id) {
-    if (!confirm('¿Eliminar esta ruta?')) return;
-    await api(`/admin/api/routes/${id}`, 'DELETE');
-    location.reload();
 }
 
 // --- API Keys ---
@@ -1015,17 +787,6 @@ async function sendPlayground() {
             output.textContent = 'Error: ' + e.message;
         }
     }
-}
-
-// --- Chain step helpers (shared by routes) ---
-function readChainSteps(container) {
-    const chain = [];
-    container.querySelectorAll('.chain-step').forEach(step => {
-        const provider = step.querySelector('.chain-provider').value;
-        const model = step.querySelector('.chain-model').value;
-        if (provider && model) chain.push({ provider, model });
-    });
-    return chain;
 }
 
 // --- Key Expiry Alerts ---

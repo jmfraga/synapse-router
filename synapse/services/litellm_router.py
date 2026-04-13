@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import time
 
 import litellm
 from litellm import Router
@@ -16,6 +17,8 @@ logger = logging.getLogger("synapse.litellm_router")
 
 # Singleton — initialized at startup via build_router()
 _router: Router | None = None
+_last_reload: float = 0
+_model_count: int = 0
 
 
 def get_router() -> Router:
@@ -23,6 +26,29 @@ def get_router() -> Router:
     if _router is None:
         raise RuntimeError("litellm Router not initialized — call build_router() first")
     return _router
+
+
+def get_router_status() -> dict:
+    """Return current Router status for the admin dashboard."""
+    if _router is None:
+        return {"status": "not_initialized", "models": [], "last_reload": 0}
+
+    models = []
+    for entry in _router.model_list:
+        params = entry.get("litellm_params", {})
+        models.append({
+            "model_name": entry.get("model_name", "?"),
+            "litellm_model": params.get("model", "?"),
+            "api_base": params.get("api_base", "default"),
+            "has_key": bool(params.get("api_key")),
+        })
+
+    return {
+        "status": "ok",
+        "model_count": _model_count,
+        "last_reload": _last_reload,
+        "models": models,
+    }
 
 
 # Map Synapse provider names to litellm model prefixes
@@ -128,8 +154,18 @@ async def build_router(db: AsyncSession) -> Router:
         cooldown_time=60,
     )
 
+    global _model_count, _last_reload
+    _model_count = len(model_list)
+    _last_reload = time.time()
+
     logger.info("litellm Router initialized with %d model entries", len(model_list))
     return _router
+
+
+async def reload_router(db: AsyncSession) -> Router:
+    """Rebuild the litellm Router from current DB state. Called after admin changes."""
+    logger.info("Reloading litellm Router...")
+    return await build_router(db)
 
 
 def _get_key(provider: Provider) -> str:
