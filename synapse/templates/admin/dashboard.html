@@ -15,7 +15,6 @@
             <a href="#dashboard">Dashboard</a>
             <a href="#providers">Providers</a>
             <a href="#routes">Rutas</a>
-            <a href="#smart-routes">Smart Routes</a>
             <a href="#keys">API Keys</a>
             <a href="#audio">Audio</a>
             <a href="#arena">Arena</a>
@@ -75,25 +74,6 @@
             </div>
 
             <div class="dash-row">
-                <div class="dash-card">
-                    <h3>Smart Routes</h3>
-                    {% if smart_routes %}
-                    <div class="dash-smart-routes">
-                        {% for sr in smart_routes %}
-                        <div class="dash-sr-row">
-                            <span class="dash-sr-name">{{ sr.name }}</span>
-                            <code>{{ sr.trigger_model }}</code>
-                            <span class="badge {{ 'active' if sr.is_enabled else 'inactive' }}">
-                                {{ "Activo" if sr.is_enabled else "Inactivo" }}
-                            </span>
-                            <span class="dash-sr-intents">{{ sr.intents | length }} intents</span>
-                        </div>
-                        {% endfor %}
-                    </div>
-                    {% else %}
-                    <p class="section-desc">Sin smart routes configurados</p>
-                    {% endif %}
-                </div>
                 <div class="dash-card">
                     <h3>API Keys</h3>
                     <div class="dash-keys-summary">
@@ -249,114 +229,6 @@
             </table>
         </section>
 
-        <!-- Smart Routes -->
-        <section id="smart-routes">
-            <h2>Smart Routes <span class="hint-inline">(ruteo por intención)</span></h2>
-            <p class="section-desc">
-                El agente pide modelo <code>auto</code> y Synapse clasifica el mensaje
-                para elegir el modelo óptimo automáticamente.
-            </p>
-            <button onclick="showSmartRouteForm()">+ Nuevo Smart Route</button>
-
-            <div id="smart-route-form" style="display:none; margin: 1rem 0;" class="smart-form">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="sr-name">Nombre</label>
-                        <input id="sr-name" placeholder="e.g. openclaw-smart" />
-                    </div>
-                    <div class="form-group">
-                        <label for="sr-trigger">Modelo trigger</label>
-                        <input id="sr-trigger" value="auto" placeholder="e.g. auto" />
-                        <span class="hint">El nombre de modelo que activa este smart route</span>
-                    </div>
-                    <div class="form-group" style="flex: 0 0 100%">
-                        <label>Cadena de clasificador (con fallback)</label>
-                        <div id="sr-classifier-chain">
-                            <!-- chain steps added dynamically -->
-                        </div>
-                        <button type="button" class="btn-small" onclick="addClassifierChainStep()">+ Agregar clasificador</button>
-                        <span class="hint">Primero intenta el primer modelo; si falla, pasa al siguiente</span>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label>Intenciones</label>
-                    <div id="sr-intents">
-                        <!-- intents added dynamically -->
-                    </div>
-                    <button type="button" class="btn-small" onclick="addIntent()">+ Agregar intención</button>
-                </div>
-
-                <div class="form-group">
-                    <label>Cadena por defecto (fallback si no clasifica)</label>
-                    <div id="sr-default-chain">
-                        <!-- chain steps added dynamically -->
-                    </div>
-                    <button type="button" class="btn-small" onclick="addDefaultChainStep()">+ Agregar provider</button>
-                </div>
-
-                <input type="hidden" id="sr-edit-id" value="" />
-                <button id="sr-submit-btn" onclick="submitSmartRoute()">Crear Smart Route</button>
-                <button id="sr-cancel-btn" style="display:none" class="btn-secondary" onclick="cancelEditSmartRoute()">Cancelar</button>
-            </div>
-
-            {% for sr in smart_routes %}
-            <div class="smart-route-card" data-id="{{ sr.id }}"
-                 data-sr='{{ sr | tojson }}'>
-                <div class="sr-header">
-                    <h3>{{ sr.name }}</h3>
-                    <div class="sr-meta">
-                        <code>model: "{{ sr.trigger_model }}"</code>
-                        <span class="badge {{ 'active' if sr.is_enabled else 'inactive' }}">
-                            {{ "Activo" if sr.is_enabled else "Inactivo" }}
-                        </span>
-                    </div>
-                    <div class="sr-actions">
-                        <button onclick="editSmartRoute({{ sr.id }})">Editar</button>
-                        <button onclick="toggleSmartRoute({{ sr.id }})">
-                            {{ "Desactivar" if sr.is_enabled else "Activar" }}
-                        </button>
-                        <button class="btn-danger" onclick="deleteSmartRoute({{ sr.id }})">Eliminar</button>
-                    </div>
-                </div>
-                <div class="sr-detail">
-                    Clasificador:
-                    {% if sr.classifier_chain %}
-                        {% for step in sr.classifier_chain %}
-                            <code>{{ step.provider }}/{{ step.model }}</code>{% if not loop.last %} → {% endif %}
-                        {% endfor %}
-                    {% else %}
-                        <code>{{ sr.classifier_model }}</code>
-                    {% endif %}
-                </div>
-                <div class="sr-intents-display">
-                    {% for intent in sr.intents %}
-                    <div class="intent-row">
-                        <span class="intent-name">{{ intent.name }}</span>
-                        <span class="intent-desc">{{ intent.description }}</span>
-                        <span class="intent-chain">
-                            {% for step in intent.provider_chain %}
-                                <code>{{ step.provider }}/{{ step.model }}</code>{% if not loop.last %} → {% endif %}
-                            {% endfor %}
-                        </span>
-                    </div>
-                    {% endfor %}
-                    {% if sr.default_chain %}
-                    <div class="intent-row intent-default">
-                        <span class="intent-name">default</span>
-                        <span class="intent-desc">Fallback</span>
-                        <span class="intent-chain">
-                            {% for step in sr.default_chain %}
-                                <code>{{ step.provider }}/{{ step.model }}</code>{% if not loop.last %} → {% endif %}
-                            {% endfor %}
-                        </span>
-                    </div>
-                    {% endif %}
-                </div>
-            </div>
-            {% endfor %}
-        </section>
-
         <!-- API Keys -->
         <section id="keys">
             <h2>API Keys</h2>
@@ -377,11 +249,6 @@
                     <div class="form-group">
                         <label>Modelos permitidos</label>
                         <div id="key-models-ms"></div>
-                    </div>
-                    <div class="form-group">
-                        <label>Smart Routes</label>
-                        <div id="key-smart-routes-ms"></div>
-                        <span class="hint">Rutas expuestas como modelos virtuales al cliente</span>
                     </div>
                     <div class="form-group">
                         <label>&nbsp;</label>
@@ -410,10 +277,6 @@
                     <div class="form-group">
                         <label for="edit-key-service">Servicio</label>
                         <input id="edit-key-service" />
-                    </div>
-                    <div class="form-group">
-                        <label>Smart Routes</label>
-                        <div id="edit-key-smart-routes-ms"></div>
                     </div>
                     <div class="form-group">
                         <label>&nbsp;</label>
@@ -524,7 +387,6 @@
             <div class="arena-tabs">
                 <button class="arena-tab active" onclick="switchArenaTab('battle')">Batalla</button>
                 <button class="arena-tab" onclick="switchArenaTab('scorecard')">Scorecard</button>
-                <button class="arena-tab" onclick="switchArenaTab('recommendations')">Recomendaciones</button>
             </div>
 
             <!-- Tab: Battle -->
@@ -670,26 +532,7 @@
                 </div>
             </div>
 
-            <!-- Tab: Recommendations -->
-            <div id="arena-tab-recommendations" class="arena-tab-content" style="display:none">
-                <div class="form-row" style="margin:1rem 0;align-items:center">
-                    <div class="form-group">
-                        <label for="rec-smart-route">Smart Route</label>
-                        <select id="rec-smart-route">
-                            <option value="">-- Seleccionar --</option>
-                            {% for sr in smart_routes %}
-                            <option value="{{ sr.id }}">{{ sr.name }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="form-group" style="display:flex;flex-direction:column;justify-content:flex-end">
-                        <button onclick="loadArenaRecommendations()">Ver recomendaciones</button>
-                    </div>
-                </div>
-                <div id="recommendations-container">
-                    <p class="section-desc">Selecciona un Smart Route para ver recomendaciones basadas en el scorecard.</p>
-                </div>
-            </div>
+            <!-- Tab: Recommendations (disabled — Smart Routes removed) -->
         </section>
 
         <!-- Analytics -->
@@ -764,12 +607,6 @@
                     </tr></thead><tbody id="analytics-service-body"></tbody></table>
                 </div>
                 <div class="analytics-table-group">
-                    <h3>Smart Routes — Por Intención</h3>
-                    <table><thead><tr>
-                        <th>Smart Route</th><th>Intent</th><th>Requests</th><th>Costo</th><th>Latencia avg</th><th>Errores</th><th>Fallbacks</th>
-                    </tr></thead><tbody id="analytics-intent-body"></tbody></table>
-                </div>
-                <div class="analytics-table-group">
                     <h3>Fallback Paths</h3>
                     <table><thead><tr>
                         <th>Ruta (provider → fallback)</th><th>Veces</th>
@@ -811,9 +648,6 @@
                         <label for="pg-model">Modelo</label>
                         <select id="pg-model">
                             <option value="">-- Seleccionar modelo --</option>
-                            {% for sr in smart_routes %}{% if sr.is_enabled %}
-                            <option value="{{ sr.trigger_model }}">{{ sr.trigger_model }} (Smart Route: {{ sr.name }})</option>
-                            {% endif %}{% endfor %}
                         </select>
                     </div>
                 </div>

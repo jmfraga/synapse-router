@@ -68,23 +68,6 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     providers = (await db.execute(select(Provider).order_by(Provider.priority))).scalars().all()
     keys = (await db.execute(select(ApiKey))).scalars().all()
     routes = (await db.execute(select(Route).order_by(Route.priority))).scalars().all()
-    smart_routes = (await db.execute(select(SmartRoute))).scalars().all()
-
-    # Parse intents for display
-    smart_routes_data = []
-    for sr in smart_routes:
-        intents = json.loads(sr.intents_json) if sr.intents_json else []
-        smart_routes_data.append({
-            "id": sr.id,
-            "name": sr.name,
-            "description": sr.description,
-            "trigger_model": sr.trigger_model,
-            "classifier_model": sr.classifier_model,
-            "classifier_chain": json.loads(sr.classifier_chain_json) if sr.classifier_chain_json else [],
-            "intents": intents,
-            "default_chain": json.loads(sr.default_chain_json) if sr.default_chain_json else [],
-            "is_enabled": sr.is_enabled,
-        })
 
     # Usage stats
     total_requests = (await db.execute(select(func.count(UsageLog.id)))).scalar() or 0
@@ -96,7 +79,6 @@ async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         "providers": providers,
         "api_keys": keys,
         "routes": routes,
-        "smart_routes": smart_routes_data,
         "stats": {
             "total_requests": total_requests,
             "total_cost": round(total_cost, 4),

@@ -245,15 +245,6 @@ async function initDropdowns() {
         providerData: cachedByProvider,
     });
 
-    // Fetch smart routes for the multi-select
-    const smartRoutesData = await api('/admin/api/smart-routes');
-    window._smartRoutes = smartRoutesData || [];
-    const srOptions = window._smartRoutes.filter(sr => sr.is_enabled).map(sr => sr.name);
-    createMultiSelect('key-smart-routes-ms', srOptions, {
-        allValue: '__none__',
-        allLabel: '(ninguna)',
-    });
-
     // Load keys table from API
     loadKeysTable();
 
@@ -559,26 +550,12 @@ async function deleteRoute(id) {
 
 // --- API Keys ---
 
-function getSmartRouteIds(containerId) {
-    const container = document.getElementById(containerId);
-    if (!container || !container.getValue) return [];
-    const val = container.getValue();
-    if (val === '__none__') return [];
-    return val.split(',').map(name => {
-        const sr = (window._smartRoutes || []).find(s => s.name === name);
-        return sr ? sr.id : null;
-    }).filter(Boolean);
-}
-
 async function loadKeysTable() {
     const keys = await api('/admin/api/keys');
     const container = document.getElementById('keys-table-container');
     if (!container) return;
 
     const rows = keys.map(k => {
-        const srBadges = (k.smart_routes || []).map(sr =>
-            `<code class="badge active" style="margin:1px">${sr.name}</code>`
-        ).join(' ') || '—';
         const actions = k.is_active
             ? `<button onclick="editKey(${k.id})">Editar</button> <button onclick="revokeKey(${k.id})">Revocar</button>`
             : '';
@@ -587,7 +564,6 @@ async function loadKeysTable() {
             <td>${k.service}</td>
             <td><code>${k.key_prefix}...</code></td>
             <td>${k.allowed_models}</td>
-            <td>${srBadges}</td>
             <td>${k.rate_limit_rpm}</td>
             <td><span class="badge ${k.is_active ? 'active' : 'inactive'}">${k.is_active ? 'Activa' : 'Revocada'}</span></td>
             <td>${actions}</td>
@@ -597,7 +573,7 @@ async function loadKeysTable() {
     container.innerHTML = `<table>
         <thead><tr>
             <th>Nombre</th><th>Servicio</th><th>Prefijo</th>
-            <th>Modelos</th><th>Smart Routes</th><th>RPM</th>
+            <th>Modelos</th><th>RPM</th>
             <th>Estado</th><th>Acciones</th>
         </tr></thead>
         <tbody>${rows}</tbody>
@@ -617,14 +593,12 @@ async function createKey() {
     const msContainer = document.getElementById('key-models-ms');
     const models = msContainer?.getValue ? msContainer.getValue() : '*';
 
-    const smartRouteIds = getSmartRouteIds('key-smart-routes-ms');
-
     if (!name || !service) {
         alert('Nombre y servicio son requeridos');
         return;
     }
 
-    const body = { name, service, allowed_models: models, smart_route_ids: smartRouteIds };
+    const body = { name, service, allowed_models: models };
 
     const result = await api('/admin/api/keys', 'POST', body);
 
@@ -641,34 +615,6 @@ async function editKey(id) {
     document.getElementById('edit-key-name').value = key.name;
     document.getElementById('edit-key-service').value = key.service;
 
-    // Build smart routes multi-select for edit
-    const srOptions = (window._smartRoutes || []).filter(sr => sr.is_enabled).map(sr => sr.name);
-    createMultiSelect('edit-key-smart-routes-ms', srOptions, {
-        allValue: '__none__',
-        allLabel: '(ninguna)',
-    });
-
-    // Pre-select assigned routes
-    const assignedNames = (key.smart_routes || []).map(sr => sr.name);
-    if (assignedNames.length > 0) {
-        const container = document.getElementById('edit-key-smart-routes-ms');
-        const dropdown = container.querySelector('.ms-dropdown');
-        if (dropdown) {
-            const allCb = dropdown.querySelector('input[value="__none__"]');
-            if (allCb) allCb.checked = false;
-            dropdown.querySelectorAll('input:not([value="__none__"])').forEach(cb => {
-                cb.checked = assignedNames.includes(cb.value);
-            });
-            // Update display
-            const display = container.querySelector('.ms-display');
-            if (display) {
-                display.textContent = assignedNames.length > 2
-                    ? `${assignedNames.length} rutas seleccionadas`
-                    : assignedNames.join(', ');
-            }
-        }
-    }
-
     document.getElementById('edit-key-modal').style.display = 'block';
 }
 
@@ -676,7 +622,6 @@ async function saveKeyEdit() {
     const id = parseInt(document.getElementById('edit-key-id').value);
     const name = document.getElementById('edit-key-name').value.trim();
     const service = document.getElementById('edit-key-service').value.trim();
-    const smartRouteIds = getSmartRouteIds('edit-key-smart-routes-ms');
 
     if (!name || !service) {
         alert('Nombre y servicio son requeridos');
@@ -684,7 +629,7 @@ async function saveKeyEdit() {
     }
 
     await api(`/admin/api/keys/${id}`, 'PUT', {
-        name, service, smart_route_ids: smartRouteIds
+        name, service
     });
 
     document.getElementById('edit-key-modal').style.display = 'none';
@@ -862,18 +807,7 @@ function renderTimeline(timeline) {
 }
 
 function renderAnalyticsIntents(intents) {
-    const tbody = document.getElementById('analytics-intent-body');
-    if (!intents.length) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-dim)">Sin datos de Smart Routes</td></tr>';
-        return;
-    }
-    tbody.innerHTML = intents.map(i => `
-        <tr>
-            <td><code>${i.smart_route}</code></td><td>${i.intent}</td><td>${i.requests}</td>
-            <td>$${i.cost.toFixed(4)}</td><td>${i.avg_latency}ms</td>
-            <td>${i.errors}</td><td>${i.fallbacks}</td>
-        </tr>
-    `).join('');
+    // Smart Routes UI removed — no-op
 }
 
 function renderAnalyticsFallbacks(paths) {
@@ -1083,158 +1017,7 @@ async function sendPlayground() {
     }
 }
 
-// --- Smart Routes ---
-function showSmartRouteForm() {
-    const form = document.getElementById('smart-route-form');
-    form.style.display = form.style.display === 'none' ? 'block' : 'none';
-
-    // Add initial classifier chain step if none exist
-    if (document.getElementById('sr-classifier-chain').children.length === 0) {
-        addClassifierChainStep();
-    }
-
-    // Add initial intent if none exist
-    if (document.getElementById('sr-intents').children.length === 0) {
-        addIntent();
-    }
-    // Add initial default chain step
-    if (document.getElementById('sr-default-chain').children.length === 0) {
-        addDefaultChainStep();
-    }
-}
-
-function addIntent() {
-    const container = document.getElementById('sr-intents');
-    const index = container.children.length;
-
-    const providerOptions = cachedProviders
-        .map(p => `<option value="${p.name}">${p.display_name}</option>`)
-        .join('');
-
-    const div = document.createElement('div');
-    div.className = 'intent-builder';
-    div.innerHTML = `
-        <div class="form-row">
-            <div class="form-group" style="flex:0 0 150px">
-                <label>Nombre</label>
-                <input class="intent-name-input" placeholder="e.g. coding" />
-            </div>
-            <div class="form-group" style="flex:1">
-                <label>Descripción (para el clasificador)</label>
-                <input class="intent-desc-input" placeholder="e.g. Programación, debugging, revisión de código" />
-            </div>
-            <div class="form-group" style="flex:0 0 30px">
-                <label>&nbsp;</label>
-                <button type="button" class="btn-small btn-danger" onclick="this.closest('.intent-builder').remove()">✕</button>
-            </div>
-        </div>
-        <div class="form-group">
-            <label>Cadena de providers para esta intención</label>
-            <div class="intent-chain-steps">
-                <div class="chain-step">
-                    <select class="chain-provider" onchange="onChainProviderChange(this)">
-                        <option value="">-- Provider --</option>
-                        ${providerOptions}
-                    </select>
-                    <select class="chain-model">
-                        <option value="">-- Modelo --</option>
-                    </select>
-                    <button type="button" class="btn-small btn-danger" onclick="removeIntentChainStep(this)">✕</button>
-                </div>
-            </div>
-            <button type="button" class="btn-small" onclick="addIntentChainStep(this)">+ Provider</button>
-        </div>
-    `;
-    container.appendChild(div);
-
-    // Populate model selects
-    div.querySelectorAll('.chain-model').forEach(populateSingleChainModel);
-}
-
-function addIntentChainStep(btn) {
-    const stepsContainer = btn.previousElementSibling;
-    const providerOptions = cachedProviders
-        .map(p => `<option value="${p.name}">${p.display_name}</option>`)
-        .join('');
-
-    const div = document.createElement('div');
-    div.className = 'chain-step';
-    div.innerHTML = `
-        <select class="chain-provider" onchange="onChainProviderChange(this)">
-            <option value="">-- Provider --</option>
-            ${providerOptions}
-        </select>
-        <select class="chain-model">
-            <option value="">-- Modelo --</option>
-        </select>
-        <button type="button" class="btn-small btn-danger" onclick="removeIntentChainStep(this)">✕</button>
-    `;
-    stepsContainer.appendChild(div);
-}
-
-function removeIntentChainStep(btn) {
-    const steps = btn.closest('.intent-chain-steps');
-    if (steps.children.length > 1) {
-        btn.closest('.chain-step').remove();
-    }
-}
-
-function addClassifierChainStep() {
-    const container = document.getElementById('sr-classifier-chain');
-    const providerOptions = cachedProviders
-        .map(p => `<option value="${p.name}">${p.display_name}</option>`)
-        .join('');
-
-    const div = document.createElement('div');
-    div.className = 'chain-step';
-    div.innerHTML = `
-        <select class="chain-provider" onchange="onChainProviderChange(this)">
-            <option value="">-- Provider --</option>
-            ${providerOptions}
-        </select>
-        <select class="chain-model">
-            <option value="">-- Modelo --</option>
-        </select>
-        <button type="button" class="btn-small btn-danger" onclick="removeClassifierChainStep(this)">✕</button>
-    `;
-    container.appendChild(div);
-}
-
-function removeClassifierChainStep(btn) {
-    const container = document.getElementById('sr-classifier-chain');
-    if (container.children.length > 1) {
-        btn.closest('.chain-step').remove();
-    }
-}
-
-function addDefaultChainStep() {
-    const container = document.getElementById('sr-default-chain');
-    const providerOptions = cachedProviders
-        .map(p => `<option value="${p.name}">${p.display_name}</option>`)
-        .join('');
-
-    const div = document.createElement('div');
-    div.className = 'chain-step';
-    div.innerHTML = `
-        <select class="chain-provider" onchange="onChainProviderChange(this)">
-            <option value="">-- Provider --</option>
-            ${providerOptions}
-        </select>
-        <select class="chain-model">
-            <option value="">-- Modelo --</option>
-        </select>
-        <button type="button" class="btn-small btn-danger" onclick="removeDefaultChainStep(this)">✕</button>
-    `;
-    container.appendChild(div);
-}
-
-function removeDefaultChainStep(btn) {
-    const container = document.getElementById('sr-default-chain');
-    if (container.children.length > 1) {
-        btn.closest('.chain-step').remove();
-    }
-}
-
+// --- Chain step helpers (shared by routes) ---
 function readChainSteps(container) {
     const chain = [];
     container.querySelectorAll('.chain-step').forEach(step => {
@@ -1243,140 +1026,6 @@ function readChainSteps(container) {
         if (provider && model) chain.push({ provider, model });
     });
     return chain;
-}
-
-function editSmartRoute(id) {
-    const card = document.querySelector(`.smart-route-card[data-id="${id}"]`);
-    if (!card) return;
-    const data = JSON.parse(card.dataset.sr);
-
-    // Show form
-    showSmartRouteForm();
-
-    // Populate fields
-    document.getElementById('sr-edit-id').value = id;
-    document.getElementById('sr-name').value = data.name;
-    document.getElementById('sr-trigger').value = data.trigger_model;
-    // Clear and rebuild classifier chain
-    const classifierContainer = document.getElementById('sr-classifier-chain');
-    classifierContainer.innerHTML = '';
-    const classifierChain = data.classifier_chain || [];
-    for (const step of classifierChain) {
-        addClassifierChainStep();
-        const lastStep = classifierContainer.lastElementChild;
-        lastStep.querySelector('.chain-provider').value = step.provider;
-        populateSingleChainModel(lastStep.querySelector('.chain-model'), step.provider);
-        lastStep.querySelector('.chain-model').value = step.model;
-    }
-    if (classifierChain.length === 0) addClassifierChainStep();
-
-    // Clear and rebuild intents
-    const intentsContainer = document.getElementById('sr-intents');
-    intentsContainer.innerHTML = '';
-    for (const intent of data.intents) {
-        addIntent();
-        const ib = intentsContainer.lastElementChild;
-        ib.querySelector('.intent-name-input').value = intent.name;
-        ib.querySelector('.intent-desc-input').value = intent.description;
-
-        // Rebuild chain steps for this intent
-        const stepsContainer = ib.querySelector('.intent-chain-steps');
-        stepsContainer.innerHTML = '';
-        for (const step of intent.provider_chain) {
-            const addBtn = ib.querySelector('.intent-chain-steps + button');
-            addIntentChainStep(addBtn);
-            const lastStep = stepsContainer.lastElementChild;
-            lastStep.querySelector('.chain-provider').value = step.provider;
-            populateSingleChainModel(lastStep.querySelector('.chain-model'), step.provider);
-            lastStep.querySelector('.chain-model').value = step.model;
-        }
-    }
-
-    // Rebuild default chain
-    const defaultContainer = document.getElementById('sr-default-chain');
-    defaultContainer.innerHTML = '';
-    const defaultChain = data.default_chain || [];
-    for (const step of defaultChain) {
-        addDefaultChainStep();
-        const lastStep = defaultContainer.lastElementChild;
-        lastStep.querySelector('.chain-provider').value = step.provider;
-        populateSingleChainModel(lastStep.querySelector('.chain-model'), step.provider);
-        lastStep.querySelector('.chain-model').value = step.model;
-    }
-    if (defaultChain.length === 0) addDefaultChainStep();
-
-    // Update buttons
-    document.getElementById('sr-submit-btn').textContent = 'Guardar Smart Route';
-    document.getElementById('sr-cancel-btn').style.display = '';
-
-    // Scroll to form
-    document.getElementById('smart-route-form').scrollIntoView({ behavior: 'smooth' });
-}
-
-function cancelEditSmartRoute() {
-    document.getElementById('sr-edit-id').value = '';
-    document.getElementById('smart-route-form').style.display = 'none';
-    document.getElementById('sr-submit-btn').textContent = 'Crear Smart Route';
-    document.getElementById('sr-cancel-btn').style.display = 'none';
-    // Reset fields
-    document.getElementById('sr-name').value = '';
-    document.getElementById('sr-trigger').value = 'auto';
-    document.getElementById('sr-classifier-chain').innerHTML = '';
-    document.getElementById('sr-intents').innerHTML = '';
-    document.getElementById('sr-default-chain').innerHTML = '';
-}
-
-async function submitSmartRoute() {
-    const editId = document.getElementById('sr-edit-id').value;
-    const name = document.getElementById('sr-name').value.trim();
-    const trigger = document.getElementById('sr-trigger').value.trim();
-    const classifierChain = readChainSteps(document.getElementById('sr-classifier-chain'));
-
-    if (!name || !trigger || classifierChain.length === 0) {
-        alert('Nombre, modelo trigger, y al menos un clasificador son requeridos');
-        return;
-    }
-
-    const intents = [];
-    document.querySelectorAll('#sr-intents .intent-builder').forEach(ib => {
-        const intentName = ib.querySelector('.intent-name-input').value.trim();
-        const intentDesc = ib.querySelector('.intent-desc-input').value.trim();
-        const chain = readChainSteps(ib.querySelector('.intent-chain-steps'));
-        if (intentName && chain.length > 0) {
-            intents.push({ name: intentName, description: intentDesc, provider_chain: chain });
-        }
-    });
-
-    if (intents.length === 0) {
-        alert('Agrega al menos una intención con su cadena de providers');
-        return;
-    }
-
-    const defaultChain = readChainSteps(document.getElementById('sr-default-chain'));
-    const classifier = classifierChain[0].model;
-    const body = {
-        name, trigger_model: trigger, classifier_model: classifier,
-        classifier_chain: classifierChain,
-        intents, default_chain: defaultChain,
-    };
-
-    if (editId) {
-        await api(`/admin/api/smart-routes/${editId}`, 'PUT', body);
-    } else {
-        await api('/admin/api/smart-routes', 'POST', body);
-    }
-    location.reload();
-}
-
-async function toggleSmartRoute(id) {
-    await api(`/admin/api/smart-routes/${id}/toggle`, 'PUT');
-    location.reload();
-}
-
-async function deleteSmartRoute(id) {
-    if (!confirm('¿Eliminar este smart route?')) return;
-    await api(`/admin/api/smart-routes/${id}`, 'DELETE');
-    location.reload();
 }
 
 // --- Key Expiry Alerts ---
@@ -2764,62 +2413,7 @@ function renderArenaScorecard() {
     container.innerHTML = html;
 }
 
-async function loadArenaRecommendations() {
-    const srId = document.getElementById('rec-smart-route')?.value;
-    const container = document.getElementById('recommendations-container');
-    if (!srId || !container) {
-        if (container) container.innerHTML = '<p class="section-desc">Selecciona un Smart Route.</p>';
-        return;
-    }
-
-    const data = await api(`/admin/api/arena/recommendations/${srId}`);
-    if (!data || !data.recommendations) {
-        container.innerHTML = '<p class="section-desc">No se pudieron obtener recomendaciones.</p>';
-        return;
-    }
-
-    const recs = data.recommendations;
-    if (recs.length === 0) {
-        container.innerHTML = '<p class="section-desc">Este Smart Route no tiene intenciones configuradas.</p>';
-        return;
-    }
-
-    container.innerHTML = recs.map(r => {
-        const currentStr = r.current_provider && r.current_model
-            ? `${r.current_provider}/${r.current_model}${r.current_rating ? ' (' + r.current_rating + '/5)' : ''}`
-            : '(sin asignar)';
-        const recStr = r.recommended_provider && r.recommended_model
-            ? `${r.recommended_provider}/${r.recommended_model} (${r.recommended_rating}/5)`
-            : '(sin datos)';
-        const impCls = r.improvement > 0 ? 'positive' : r.improvement < 0 ? 'negative' : 'neutral';
-        const impStr = r.improvement !== null ? (r.improvement > 0 ? '+' : '') + r.improvement : '-';
-        const canApply = r.recommended_provider && r.recommended_model
-            && (r.recommended_provider !== r.current_provider || r.recommended_model !== r.current_model);
-
-        return `<div class="recommendation-row">
-            <span class="rec-intent">${r.intent_name}</span>
-            <span class="rec-current">${currentStr}</span>
-            <span class="rec-arrow">&rarr;</span>
-            <span class="rec-recommended">${recStr}</span>
-            <span class="rec-improvement ${impCls}">${impStr}</span>
-            ${canApply ? `<button class="btn-small" onclick="applyArenaRecommendation(${data.smart_route_id}, '${r.intent_name}', '${r.recommended_provider}', '${r.recommended_model}')">Aplicar</button>` : ''}
-        </div>`;
-    }).join('');
-}
-
-async function applyArenaRecommendation(smartRouteId, intentName, provider, model) {
-    if (!confirm(`¿Actualizar intent "${intentName}" a ${provider}/${model}?`)) return;
-    const res = await api('/admin/api/arena/apply-recommendation', 'POST', {
-        smart_route_id: smartRouteId,
-        intent_name: intentName,
-        provider,
-        model,
-    });
-    if (res.status === 'ok') {
-        alert(`Intent "${intentName}" actualizado a ${provider}/${model}`);
-        loadArenaRecommendations();
-    }
-}
+// Arena recommendations removed — Smart Routes no longer active
 
 // --- Dashboard Overview ---
 
