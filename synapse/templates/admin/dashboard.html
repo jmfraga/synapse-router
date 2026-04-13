@@ -14,6 +14,7 @@
         <nav>
             <a href="#dashboard">Dashboard</a>
             <a href="#providers">Providers</a>
+            <a href="#health">Salud</a>
             <a href="#keys">API Keys</a>
             <a href="#audio">Audio</a>
             <a href="#arena">Arena</a>
@@ -143,6 +144,65 @@
             </div>
             <div id="provider-config-cards">
                 <!-- Populated by JS -->
+            </div>
+        </section>
+
+        <!-- Router Status & Provider Health -->
+        <section id="health">
+            <h2>Salud del Sistema</h2>
+            <p class="section-desc">
+                Estado del Router, salud de providers y rendimiento por modelo (últimas 24h).
+            </p>
+
+            <!-- Router Status -->
+            <div class="dash-card" style="margin-bottom:1rem">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                    <h3>litellm Router</h3>
+                    <button onclick="reloadRouter()" style="font-size:0.85rem">Reload Router</button>
+                </div>
+                <div class="stats-bar" style="margin-top:0.5rem">
+                    <div class="stat">
+                        <span class="stat-value" id="router-model-count">-</span>
+                        <span class="stat-label">Modelos registrados</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-value" id="router-status">-</span>
+                        <span class="stat-label">Estado</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-value" id="router-last-reload">-</span>
+                        <span class="stat-label">Último reload</span>
+                    </div>
+                </div>
+                <details style="margin-top:0.8rem">
+                    <summary style="cursor:pointer;color:var(--text-dim);font-size:0.85rem">Modelos registrados</summary>
+                    <table style="margin-top:0.5rem">
+                        <thead><tr><th>Nombre</th><th>litellm Model</th><th>Base URL</th><th>Key</th></tr></thead>
+                        <tbody id="router-models-body"></tbody>
+                    </table>
+                </details>
+            </div>
+
+            <!-- Provider Health (24h) -->
+            <div class="dash-card" style="margin-bottom:1rem">
+                <h3>Salud por Provider <span class="hint-inline">(24h)</span></h3>
+                <table>
+                    <thead><tr>
+                        <th>Provider</th><th>Requests</th><th>Success %</th><th>Latencia avg</th><th>Costo</th>
+                    </tr></thead>
+                    <tbody id="health-provider-body"></tbody>
+                </table>
+            </div>
+
+            <!-- Per-model health (24h) -->
+            <div class="dash-card">
+                <h3>Rendimiento por Modelo <span class="hint-inline">(24h)</span></h3>
+                <table>
+                    <thead><tr>
+                        <th>Provider</th><th>Modelo</th><th>Requests</th><th>Latencia avg</th><th>Min</th><th>Max</th><th>tok/s</th><th>Tokens</th><th>Costo</th><th>Último uso</th>
+                    </tr></thead>
+                    <tbody id="health-model-body"></tbody>
+                </table>
             </div>
         </section>
 
@@ -478,10 +538,6 @@
                     <div class="metric-card">
                         <span class="metric-value" id="m-errors">-</span>
                         <span class="metric-label">Errores</span>
-                    </div>
-                    <div class="metric-card">
-                        <span class="metric-value" id="m-routes">-</span>
-                        <span class="metric-label">Rutas activas</span>
                     </div>
                 </div>
                 <h4>Salud por Ruta</h4>

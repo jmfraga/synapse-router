@@ -2344,4 +2344,95 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     loadArenaPresets();
     startMetricsPolling();
+    loadHealthPanel();
 });
+
+// --- Router Status & Provider Health ---
+
+async function loadHealthPanel() {
+    try {
+        const [routerRes, healthRes] = await Promise.all([
+            api('/admin/api/router-status'),
+            api('/admin/api/provider-health'),
+        ]);
+        renderRouterStatus(routerRes);
+        renderProviderHealth(healthRes);
+    } catch (e) {
+        console.error('Failed to load health panel:', e);
+    }
+}
+
+function renderRouterStatus(data) {
+    document.getElementById('router-model-count').textContent = data.model_count || data.models?.length || 0;
+    document.getElementById('router-status').textContent = data.status || 'unknown';
+
+    if (data.last_reload) {
+        const d = new Date(data.last_reload * 1000);
+        document.getElementById('router-last-reload').textContent = d.toLocaleTimeString('es-MX');
+    } else {
+        document.getElementById('router-last-reload').textContent = '-';
+    }
+
+    const tbody = document.getElementById('router-models-body');
+    tbody.innerHTML = '';
+    for (const m of (data.models || [])) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><code>${m.model_name}</code></td>
+            <td><code style="color:var(--text-dim)">${m.litellm_model}</code></td>
+            <td>${m.api_base}</td>
+            <td>${m.has_key ? '✓' : '-'}</td>
+        `;
+        tbody.appendChild(tr);
+    }
+}
+
+function renderProviderHealth(data) {
+    // By provider summary
+    const provBody = document.getElementById('health-provider-body');
+    provBody.innerHTML = '';
+    for (const p of (data.by_provider || [])) {
+        const rate = p.success_rate ?? 0;
+        const rateColor = rate >= 90 ? 'var(--success, #2ecc71)' : rate >= 50 ? 'var(--warning, #f39c12)' : 'var(--danger, #e74c3c)';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><strong>${p.provider}</strong></td>
+            <td>${p.requests}</td>
+            <td style="color:${rateColor};font-weight:600">${rate}%</td>
+            <td>${p.avg_latency_ms ? p.avg_latency_ms + 'ms' : '-'}</td>
+            <td>$${p.total_cost_usd || 0}</td>
+        `;
+        provBody.appendChild(tr);
+    }
+
+    // By model detail
+    const modelBody = document.getElementById('health-model-body');
+    modelBody.innerHTML = '';
+    for (const m of (data.by_model || [])) {
+        const tr = document.createElement('tr');
+        const lastUsed = m.last_used ? new Date(m.last_used + 'Z').toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'}) : '-';
+        tr.innerHTML = `
+            <td>${m.provider}</td>
+            <td><code>${m.model}</code></td>
+            <td>${m.requests}</td>
+            <td>${m.avg_latency_ms ? m.avg_latency_ms + 'ms' : '-'}</td>
+            <td>${m.min_latency_ms ? m.min_latency_ms + 'ms' : '-'}</td>
+            <td>${m.max_latency_ms ? m.max_latency_ms + 'ms' : '-'}</td>
+            <td>${m.avg_tokens_per_sec ? m.avg_tokens_per_sec + ' t/s' : '-'}</td>
+            <td>${(m.total_tokens || 0).toLocaleString()}</td>
+            <td>$${m.total_cost_usd || 0}</td>
+            <td>${lastUsed}</td>
+        `;
+        modelBody.appendChild(tr);
+    }
+}
+
+async function reloadRouter() {
+    try {
+        const res = await api('/admin/api/router-reload', 'POST');
+        renderRouterStatus(res);
+        alert('Router recargado: ' + (res.model_count || res.models?.length || 0) + ' modelos');
+    } catch (e) {
+        alert('Error al recargar: ' + e.message);
+    }
+}
