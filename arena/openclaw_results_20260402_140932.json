@@ -1,0 +1,89 @@
+[
+  {
+    "test": "PM Delegación",
+    "gemma-4-31b-it": {
+      "tokens": 369,
+      "tps": 30.7,
+      "time_ms": 12034,
+      "response_preview": "**Razonamiento:**\n\nEl usuario ha solicitado tres acciones independientes que deben ser delegadas a agentes especializados según sus capacidades:\n1. **Iris:** Se encarga de la comunicación externa (Wha"
+    },
+    "nemotron-30b-a3b": {
+      "tokens": 1500,
+      "tps": 91.1,
+      "time_ms": 16460,
+      "response_preview": "\n**Razonamiento breve**\n\n1. **Recordatorio a la esposa** – Lo gestiona **Iris** enviándole un mensaje de WhatsApp con la información de la cita.  \n2. **Crear tarea en Kanban** – Lo realiza **Atlas** c"
+    }
+  },
+  {
+    "test": "Iris Conversación",
+    "gemma-4-31b-it": {
+      "tokens": 118,
+      "tps": 11.7,
+      "time_ms": 10112,
+      "response_preview": "¡Hola! Claro que sí, yo te ayudo con eso. 😊\n\nPara tu cena del viernes en Polanco, busco un lugarito italiano que esté lindo, romántico pero con precios accesibles para dos personas. En un momento te m"
+    },
+    "nemotron-30b-a3b": {
+      "tokens": 591,
+      "tps": 89.6,
+      "time_ms": 6593,
+      "response_preview": "\n¡Claro, Ana! 😊  \n\n**🍝 Restaurante italiano en Polanco**  \nTe recomiendo *Trattoria La Bella* (Av. Polanco 220). Es íntimo, tiene pastas frescas y pizzas artesanales, y los precios están entre $300‑$5"
+    }
+  },
+  {
+    "test": "Atlas DevOps + Kanban",
+    "gemma-4-31b-it": {
+      "tokens": 455,
+      "tps": 30.1,
+      "time_ms": 15122,
+      "response_preview": "Hola, soy Atlas. He recibido las instrucciones del PM. Mi objetivo es validar la disponibilidad de los servicios críticos de OpenClaw en la Raspberry Pi 5 y gestionar el tablero Kanban según los resul"
+    },
+    "nemotron-30b-a3b": {
+      "tokens": 1500,
+      "tps": 93.9,
+      "time_ms": 15982,
+      "response_preview": "\n**Plan paso a paso**\n\n| Paso | Acción | Herramienta a usar | Comentario |\n|------|--------|--------------------|------------|\n| 1 | Verificar que el **gateway** (puerto 18789) responda. | `http_check"
+    }
+  },
+  {
+    "test": "Argus Log Analysis",
+    "gemma-4-31b-it": {
+      "error": "HTTPSConnectionPool(host='integrate.api.nvidia.com', port=443): Read timed out. (read timeout=120)"
+    },
+    "nemotron-30b-a3b": {
+      "tokens": 1500,
+      "tps": 92.6,
+      "time_ms": 16199,
+      "response_preview": "\n**1. Resumen ejecutivo**  \nDurante la ejecución del *daily health check* (02‑04‑2026 02:00) el gateway de OpenClaw reportó un estado mixto: la mayoría de los componentes responde dentro de parámetros"
+    }
+  },
+  {
+    "test": "CHAPPiE Code Review",
+    "gemma-4-31b-it": {
+      "tokens": 1500,
+      "tps": 23.9,
+      "time_ms": 62731,
+      "response_preview": "¡Hola! Aquí **CHAPPiE**, agente desarrollador. He analizado el fragmento de código del gateway de OpenClaw y, sinceramente, **este código es extremadamente peligroso en su estado actual**.\n\nPresenta v"
+    },
+    "nemotron-30b-a3b": {
+      "tokens": 1500,
+      "tps": 94.3,
+      "time_ms": 15903,
+      "response_preview": "\n## Análisis del fragmento\n\n```python\n@router.post('/api/sessions/{agent_id}/send')\nasync def send_message(agent_id: str, request: Request):\n    body = await request.json()\n    message = body['message"
+    }
+  },
+  {
+    "test": "Phoenix Estrategia",
+    "gemma-4-31b-it": {
+      "tokens": 1025,
+      "tps": 11.4,
+      "time_ms": 90050,
+      "response_preview": "¡Qué onda! Claro que sí, cuenta con ello. Para pasar de 500 a 2000 seguidores con presupuesto limitado, no podemos depender de pauta, así que vamos a apostarle todo al **alcance orgánico vía Reels** y"
+    },
+    "nemotron-30b-a3b": {
+      "tokens": 1326,
+      "tps": 94.6,
+      "time_ms": 14020,
+      "response_preview": "\n**🔹 Estrategia general (3‑4 líneas)**  \n- Posicionar a SimAcademy como la “fuente de referencia” para residentes y estudiantes de medicina que buscan material práctico, actualizado y fácil de digerir"
+    }
+  }
+]
