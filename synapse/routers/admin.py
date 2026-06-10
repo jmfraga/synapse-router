@@ -392,8 +392,19 @@ async def test_provider(
             "max_tokens": 50,
             "stream": False,
         }
-        if target.get("base_url"):
-            call_kwargs["api_base"] = target["base_url"]
+        # Resolve per-model base URL (MLX stores one URL per model in config_json)
+        resolved_base = provider.base_url or ""
+        if provider.config_json:
+            try:
+                _cfg = json.loads(provider.config_json)
+                _model_urls = _cfg.get("model_base_urls", {}) or {}
+                resolved_base = _model_urls.get(data.model, resolved_base)
+            except Exception:
+                pass
+        if provider.name.startswith("mlx") and resolved_base and not resolved_base.rstrip("/").endswith("/v1"):
+            resolved_base = resolved_base.rstrip("/") + "/v1"
+        if resolved_base:
+            call_kwargs["api_base"] = resolved_base
         if key:
             call_kwargs["api_key"] = key
 

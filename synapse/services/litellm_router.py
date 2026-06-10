@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from synapse.models import Provider
+from synapse.models.smart_route import SmartRoute
 from synapse.services.litellm_callback import SynapseUsageCallback
 
 logger = logging.getLogger("synapse.litellm_router")
@@ -91,14 +92,26 @@ async def build_router(db: AsyncSession) -> Router:
                 model_base = model_urls.get(model_id, base_url).rstrip("/")
                 if not model_base.endswith("/v1"):
                     model_base = f"{model_base}/v1"
-                model_list.append({
+                # Sticky fallback: cualquier deployment MLX local (host 127.0.0.1
+                # o localhost en cualquier puerto :80xx) recibe allowed_fails=3 /
+                # cooldown_time=600. Origen: zombie-loop de Qwen3.6 (2026-05-04, 8
+                # caídas en 80 min) por bugs upstream mlx-lm 0.31.2 en arquitecturas
+                # híbridas + retry storm desde RPi5. Generalizado para cubrir Gemma-E4B
+                # (8086), Qwen3.6 (8088) y Gemma-26B/31B (8091). Audio (:8090) no pasa
+                # por el router. Detección por host evita falsos positivos contra
+                # cloud providers.
+                deployment = {
                     "model_name": model_id,
                     "litellm_params": {
                         "model": f"openai/{model_id}",
                         "api_base": model_base,
                         "api_key": "not-needed",
                     },
-                })
+                }
+                if ("//localhost:" in model_base) or ("//127.0.0.1:" in model_base):
+                    deployment["litellm_params"]["allowed_fails"] = 3
+                    deployment["litellm_params"]["cooldown_time"] = 600
+                model_list.append(deployment)
                 logger.info("Added MLX model: %s -> %s", model_id, model_base)
 
         elif name == "minimax":
@@ -122,6 +135,26 @@ async def build_router(db: AsyncSession) -> Router:
                 },
             })
 
+        elif name == "nvidia":
+            # NVIDIA NIM exposes models under vendor prefixes (z-ai/*, minimaxai/*,
+            # google/*, meta/*, nvidia/*). Register one wildcard per known prefix
+            # so clients can pass the vendor-prefixed model id directly.
+            prefix = _PROVIDER_PREFIXES[name]  # "nvidia_nim/"
+            nim_vendor_patterns = [
+                "nvidia/*", "z-ai/*", "minimaxai/*", "google/*", "meta/*",
+                "mistralai/*", "qwen/*", "deepseek-ai/*", "microsoft/*",
+                "ibm/*", "thudm/*", "writer/*", "bigcode/*", "nv-mistralai/*",
+            ]
+            for pat in nim_vendor_patterns:
+                model_list.append({
+                    "model_name": pat,
+                    "litellm_params": {
+                        "model": f"{prefix}{pat}",
+                        "api_base": base_url or "https://integrate.api.nvidia.com/v1",
+                        "api_key": api_key,
+                    },
+                })
+
         else:
             # Cloud providers: use litellm native prefixes
             prefix = _PROVIDER_PREFIXES.get(name, f"{name}/")
@@ -134,6 +167,89 @@ async def build_router(db: AsyncSession) -> Router:
             })
 
         logger.info("Registered provider: %s", name)
+
+    # ── Smart Routes as litellm model aliases ────────────────────────────────
+    # Each enabled SmartRoute with a non-empty default_chain_json is registered
+    # as a named model group in the router. The first entry in the chain becomes
+    # the primary deployment; subsequent entries act as fallbacks via multiple
+    # deployments under the same model_name (litellm.Router round-robins /
+    # fails over across them).  This lets external clients pass
+    # `model=<route.trigger_model>` (e.g. "essayrubric-eval") without knowing
+    # which actual provider/model to use.
+    routes_result = await db.execute(
+        select(SmartRoute).where(SmartRoute.is_enabled.is_(True))
+    )
+    smart_routes = routes_result.scalars().all()
+    route_alias_count = 0
+    providers_by_name = {p.name: p for p in providers}
+    for route in smart_routes:
+        chain = json.loads(route.default_chain_json or "[]")
+        if not chain:
+            continue
+        trigger = route.trigger_model or route.name
+        # Retrieve the API key / base URL for each provider in the chain from
+        # already-loaded providers dict (keyed by provider name).
+        added = 0
+        for entry in chain:
+            prov_name = entry.get("provider", "")
+            model_id = entry.get("model", "")
+            if not prov_name or not model_id:
+                continue
+
+            # MLX providers need special treatment: they use openai/ prefix and
+            # require a local api_base.  Look up the model_base_url from the
+            # mlx/mlx-heavy provider config; if not found, skip to avoid
+            # registering an un-routable deployment (litellm rejects unknown
+            # providers at startup).
+            if prov_name.startswith("mlx"):
+                prov = providers_by_name.get(prov_name)
+                if not prov:
+                    logger.warning(
+                        "SmartRoute '%s': provider '%s' not found, skipping model '%s'",
+                        trigger, prov_name, model_id,
+                    )
+                    continue
+                config = json.loads(prov.config_json) if prov.config_json else {}
+                model_urls = config.get("model_base_urls", {})
+                model_base = model_urls.get(model_id, prov.base_url or "").rstrip("/")
+                if not model_base:
+                    logger.warning(
+                        "SmartRoute '%s': no api_base for MLX model '%s', skipping",
+                        trigger, model_id,
+                    )
+                    continue
+                if not model_base.endswith("/v1"):
+                    model_base = f"{model_base}/v1"
+                model_list.append({
+                    "model_name": trigger,
+                    "litellm_params": {
+                        "model": f"openai/{model_id}",
+                        "api_base": model_base,
+                        "api_key": "not-needed",
+                    },
+                })
+                added += 1
+                continue
+
+            prov = providers_by_name.get(prov_name)
+            api_key = _get_key(prov) if prov else ""
+            prefix = _PROVIDER_PREFIXES.get(prov_name, f"{prov_name}/")
+            litellm_model = f"{prefix}{model_id}"
+            deployment: dict = {
+                "model_name": trigger,
+                "litellm_params": {
+                    "model": litellm_model,
+                },
+            }
+            if api_key:
+                deployment["litellm_params"]["api_key"] = api_key
+            model_list.append(deployment)
+            added += 1
+            route_alias_count += 1
+        logger.info(
+            "Registered SmartRoute alias: %s -> %d deployment(s)", trigger, added
+        )
+    logger.info("Total SmartRoute alias deployments added: %d", route_alias_count)
 
     # Configure litellm globals
     litellm.telemetry = False

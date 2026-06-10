@@ -115,9 +115,14 @@ async def chat_completions(
         if request.model not in allowed:
             raise HTTPException(403, f"Model '{request.model}' not allowed for this key")
 
-    # Translate provider:model (colon) to provider/model (slash) for Arena compat
+    # Translate provider:model (colon) to provider/model (slash) for Arena compat.
+    # For MLX providers, the registered model_name is the bare model_id (no prefix),
+    # so strip the "mlx:" / "mlx-heavy:" prefix to hit the correct Router entry.
     model = request.model
-    if ":" in model and "/" not in model:
+    _STRIP_PROVIDER_PREFIXES = ("mlx:", "mlx-heavy:", "nvidia:")
+    if model.startswith(_STRIP_PROVIDER_PREFIXES):
+        model = model.split(":", 1)[1]
+    elif ":" in model and "/" not in model:
         model = model.replace(":", "/", 1)
 
     kwargs = {}
