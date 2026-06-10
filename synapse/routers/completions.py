@@ -33,7 +33,10 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 @router.get("/v1/models")
-async def list_models(db: AsyncSession = Depends(get_db)):
+async def list_models(
+    api_key: ApiKey = Depends(authenticate),
+    db: AsyncSession = Depends(get_db),
+):
     """Return available models in OpenAI-compatible format."""
     from synapse.routers.admin import _fetch_models_for_provider, _get_provider_key
 
