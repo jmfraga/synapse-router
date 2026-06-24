@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from typing import Optional
 
 import litellm
@@ -32,6 +33,10 @@ router = APIRouter()
 # /v1/models — OpenAI-compatible model listing
 # ---------------------------------------------------------------------------
 
+_MODELS_CACHE: dict = {"ts": 0.0, "data": None}
+_MODELS_TTL_S = 180
+
+
 @router.get("/v1/models")
 async def list_models(
     api_key: ApiKey = Depends(authenticate),
@@ -39,6 +44,10 @@ async def list_models(
 ):
     """Return available models in OpenAI-compatible format."""
     from synapse.routers.admin import _fetch_models_for_provider, _get_provider_key
+
+    now_mono = time.monotonic()
+    if _MODELS_CACHE["data"] is not None and now_mono - _MODELS_CACHE["ts"] < _MODELS_TTL_S:
+        return _MODELS_CACHE["data"]
 
     settings = get_settings()
     result = await db.execute(
@@ -75,7 +84,10 @@ async def list_models(
     for entries in results:
         all_model_entries.extend(entries)
 
-    return {"object": "list", "data": all_model_entries}
+    payload = {"object": "list", "data": all_model_entries}
+    _MODELS_CACHE["data"] = payload
+    _MODELS_CACHE["ts"] = now_mono
+    return payload
 
 
 class Message(BaseModel):
@@ -161,8 +173,9 @@ async def chat_completions(
             **kwargs,
         )
     except Exception as e:
-        logger.exception("completions error model=%s: %s", model, e)
-        raise HTTPException(502, f"Provider error: {e}")
+        request_id = uuid.uuid4().hex[:12]
+        logger.exception("completions error request_id=%s model=%s: %s", request_id, model, e)
+        raise HTTPException(502, {"error": "upstream_error", "request_id": request_id})
 
     data = response.model_dump()
     sanitize_response_data(data)
@@ -194,5 +207,7 @@ async def _stream_response(llm_router, model: str, messages: list[dict], **kwarg
             yield f"data: {json.dumps(chunk_data)}\n\n"
         yield "data: [DONE]\n\n"
     except Exception as e:
-        error = {"error": {"message": str(e), "type": "server_error"}}
+        request_id = uuid.uuid4().hex[:12]
+        logger.exception("stream error request_id=%s model=%s: %s", request_id, model, e)
+        error = {"error": {"message": "upstream_error", "type": "server_error", "request_id": request_id}}
         yield f"data: {json.dumps(error)}\n\n"

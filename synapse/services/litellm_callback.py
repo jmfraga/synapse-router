@@ -37,8 +37,8 @@ class SynapseUsageCallback(CustomLogger):
             cost = 0.0
             try:
                 cost = litellm.completion_cost(completion_response=response_obj)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("completion_cost failed model=%s: %s", model, e)
 
             # API key ID from metadata (set by completions_v2 handler)
             metadata = kwargs.get("metadata", {}) or {}

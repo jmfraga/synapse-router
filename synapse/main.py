@@ -61,9 +61,9 @@ async def health():
 async def metrics():
     """Real-time metrics for Synapse Router monitoring."""
     async with async_session() as db:
-        # Per-route metrics (last 1h)
+        # Per-route metrics (last 1h) — v2: grouped by provider/model (smart_route_name vestigial)
         routes_q = await db.execute(text("""
-            SELECT smart_route_name, intent, provider, model,
+            SELECT provider, model,
                    COUNT(*) as requests,
                    ROUND(AVG(latency_ms)) as avg_latency_ms,
                    MIN(latency_ms) as min_ms,
@@ -72,9 +72,8 @@ async def metrics():
                    SUM(CASE WHEN status<>'success' THEN 1 ELSE 0 END) as errors
             FROM usage_logs
             WHERE created_at >= datetime('now', '-1 hour')
-              AND smart_route_name <> ''
-            GROUP BY smart_route_name, intent, provider, model
-            ORDER BY smart_route_name, requests DESC
+            GROUP BY provider, model
+            ORDER BY requests DESC
         """))
         routes = [dict(r._mapping) for r in routes_q.fetchall()]
 
@@ -89,16 +88,15 @@ async def metrics():
         """))
         summary = dict(summary_q.fetchone()._mapping)
 
-        # Per-route health (last 1h): success rate + avg latency
+        # Per-model health (last 1h): success rate + avg latency
         health_q = await db.execute(text("""
-            SELECT smart_route_name,
+            SELECT provider, model,
                    COUNT(*) as requests,
                    ROUND(AVG(latency_ms)) as avg_latency_ms,
                    ROUND(100.0 * SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) / COUNT(*), 1) as success_rate
             FROM usage_logs
             WHERE created_at >= datetime('now', '-1 hour')
-              AND smart_route_name <> ''
-            GROUP BY smart_route_name
+            GROUP BY provider, model
             ORDER BY success_rate ASC
         """))
         health = [dict(r._mapping) for r in health_q.fetchall()]

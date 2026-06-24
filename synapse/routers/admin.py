@@ -1192,7 +1192,7 @@ async def _fetch_models_for_provider(provider: Provider, key: str, settings) -> 
                 models = KNOWN_MODELS[name]
 
     except Exception as e:
-        logger.debug(f"Could not fetch models for {name}: {e}")
+        logger.warning("Could not fetch models for provider %s: %s", name, e)
         # Fallback to known models on error
         if name in KNOWN_MODELS:
             models = KNOWN_MODELS[name]

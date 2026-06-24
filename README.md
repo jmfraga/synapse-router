@@ -46,10 +46,10 @@
 ### LLM Routing
 - **API compatible con OpenAI** — drop-in replacement: `/v1/models`, `/v1/chat/completions` con tool-use/function calling
 - **9 providers**: Ollama (local), Groq, NVIDIA NIM, Anthropic, OpenAI, Gemini, Perplexity, MiniMax — **415+ modelos**
-- **Ruteo por capas** con fallback automático por prioridad de provider
-- **Smart Routes** — ruteo por intención con clasificador LLM local (llama3.1:8b)
-- **Per-key routing** — API keys vinculadas a Smart Routes para servicios especializados
-- **Rutas explícitas** — pattern matching con wildcards (`gpt-4*` → provider chain)
+- **v2 — `litellm.Router`** como motor de routing: el clasificador LLM y el ruteo por intención fueron retirados del request path
+- **Smart Routes como aliases estáticos** — sobreviven solo como nombres de modelo virtual que mapean a una cadena de deployments (sin clasificación dinámica)
+- **Sticky fallback MLX** — `allowed_fails=3`, `cooldown_time=600` solo para hosts locales (lección del zombie-loop Qwen3.6, 2026-05-04)
+- **Per-key routing** — API keys vinculadas a modelos permitidos para servicios especializados
 - **Streaming nativo** (SSE)
 
 ### Clasificación de Modelos
@@ -192,7 +192,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jmfraga.whisper-serv
 ### Listar Modelos
 
 ```bash
-curl http://localhost:8800/v1/models
+curl http://100.72.169.113:8800/v1/models
 ```
 
 Devuelve la lista completa de modelos disponibles en formato OpenAI. Incluye modelos de todos los providers habilitados y Smart Routes como modelos virtuales.
@@ -200,7 +200,7 @@ Devuelve la lista completa de modelos disponibles en formato OpenAI. Incluye mod
 ### Chat Completions
 
 ```bash
-curl http://localhost:8800/v1/chat/completions \
+curl http://100.72.169.113:8800/v1/chat/completions \
   -H "Authorization: Bearer syn-tu-api-key" \
   -H "Content-Type: application/json" \
   -d '{"model": "auto", "messages": [{"role": "user", "content": "Hola"}]}'
@@ -222,7 +222,7 @@ const client = new OpenAI({
 ### Transcripción (STT)
 
 ```bash
-curl http://localhost:8800/v1/audio/transcriptions \
+curl http://100.72.169.113:8800/v1/audio/transcriptions \
   -H "Authorization: Bearer syn-tu-api-key" \
   -F "file=@audio.wav" \
   -F "model=whisper-large-v3" \
@@ -232,7 +232,7 @@ curl http://localhost:8800/v1/audio/transcriptions \
 ### Texto a Voz (TTS)
 
 ```bash
-curl http://localhost:8800/v1/audio/speech \
+curl http://100.72.169.113:8800/v1/audio/speech \
   -H "Authorization: Bearer syn-tu-api-key" \
   -H "Content-Type: application/json" \
   -d '{"model": "tts-local", "input": "Hola mundo", "voice": "paulina"}' \
