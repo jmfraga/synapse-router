@@ -8,7 +8,7 @@ Synapse v2 (litellm.Router) está sano en lo arquitectónico: auth Bearer con ha
 ## Hallazgos
 
 ### F-1. API keys de providers en texto plano en SQLite legible + backups — [ALTA]
-<!-- Estado: [x] parcial 2026-06-11 · chmod 600 aplicado a .env, synapse.db y 3 backups. Pendiente: vaciar api_key_value en DB para que env quede como única fuente de verdad. -->
+<!-- Estado: [x] completo 2026-06-23 · (1) chmod 600 .env synapse.db synapse.db.bak-* (2026-06-11); (2) api_key_value vaciado en 7 cloud providers (anthropic/gemini/groq/nvidia/openai/perplexity/minimax) — env es fuente única; minimax migrado de DB-only a SYNAPSE_MINIMAX_API_KEY; mlx/mlx-heavy mantienen placeholder "not-needed". Backup pre-cleanup: synapse.db.bak-pre-f1-20260623. -->
 
 - **Dimensión**: seguridad
 - **Evidencia**: `sqlite3 synapse.db "SELECT name, ..."` → 8 providers con key `DB-STORED` (groq, nvidia, anthropic, openai, gemini, perplexity, minimax, mlx). `stat -f '%Sp' synapse.db` → `-rw-r--r--` (644). Mismas keys duplicadas en 3 backups del dir: `synapse.db.bak-202604121027`, `synapse.db.bak-phi4-final-20260504193203`, `synapse.db.bak-pre-phi4-cleanup-202605041837`. `.env` también 644 con las mismas keys (tercera copia). `synapse/models/provider.py:17` (`api_key_value` en Text plano).
