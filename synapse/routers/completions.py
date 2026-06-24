@@ -154,8 +154,8 @@ async def chat_completions(
         if key in _FORWARD_FIELDS and key not in kwargs:
             kwargs[key] = val
 
-    # Anthropic Opus 4.8+ deprecated `temperature`; litellm drop_params doesn't catch it yet.
-    if model.startswith(("anthropic/claude-opus-4-8", "anthropic/claude-opus-5")):
+    # Anthropic Opus 4.7+ deprecated `temperature`; litellm drop_params doesn't catch it yet.
+    if model.startswith(("anthropic/claude-opus-4-7", "anthropic/claude-opus-4-8", "anthropic/claude-opus-5")):
         kwargs.pop("temperature", None)
 
     messages = [m.model_dump() for m in request.messages]

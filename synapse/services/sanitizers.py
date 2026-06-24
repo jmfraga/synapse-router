@@ -59,8 +59,12 @@ def sanitize_response_data(data: dict) -> dict:
     """Apply all sanitizations to a completion response dict (non-streaming)."""
     for choice in data.get("choices", []):
         msg = choice.get("message") or choice.get("delta") or {}
-        msg.pop("reasoning_content", None)
+        reasoning = msg.pop("reasoning_content", None)
         msg.pop("thinking_blocks", None)
+        # Reasoning models (Nemotron, etc.) can exhaust max_tokens in thinking and
+        # leave content empty. Fall back to reasoning so the client sees something.
+        if not msg.get("content") and isinstance(reasoning, str) and reasoning.strip():
+            msg["content"] = reasoning.strip()
         if isinstance(msg.get("content"), str):
             msg["content"] = sanitize_tts_markup(msg["content"])
     return data
