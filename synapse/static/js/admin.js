@@ -1662,6 +1662,86 @@ function stopArenaBattle() {
     document.getElementById('arena-status').textContent = 'Detenido';
 }
 
+// Arena multimodal attachment state (set by onArenaAttachmentChange).
+let arenaAttachment = null;  // { kind, base64?, media_type?, transcript?, metadata }
+
+async function onArenaAttachmentChange(ev) {
+    const f = ev.target.files && ev.target.files[0];
+    const chip = document.getElementById('arena-attachment-chip');
+    const clearBtn = document.getElementById('arena-attachment-clear');
+    const status = document.getElementById('arena-status');
+    if (!f) { clearArenaAttachment(); return; }
+    if (f.size > 25 * 1024 * 1024) {
+        status.textContent = 'Adjunto > 25 MB';
+        ev.target.value = '';
+        return;
+    }
+    chip.style.display = '';
+    chip.textContent = `Subiendo ${f.name}...`;
+    clearBtn.style.display = '';
+    try {
+        const fd = new FormData();
+        fd.append('file', f);
+        const res = await fetch('/admin/api/arena/upload-attachment', { method: 'POST', body: fd });
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).substring(0, 200)}`);
+        arenaAttachment = await res.json();
+        chip.textContent = arenaAttachmentLabel(arenaAttachment);
+        status.textContent = '';
+    } catch (e) {
+        arenaAttachment = null;
+        chip.textContent = `Error: ${e.message}`;
+        ev.target.value = '';
+    }
+}
+
+function arenaAttachmentLabel(att) {
+    if (!att) return '';
+    const md = att.metadata || {};
+    if (att.kind === 'image') return `[IMG] ${md.filename || ''}`.trim();
+    if (att.kind === 'pdf') return `[PDF ${md.pages || '?'}p] ${md.filename || ''}`.trim();
+    if (att.kind === 'audio') {
+        const chars = md.transcript_chars || 0;
+        return `[AUDIO transcrito ${chars} chars] ${md.filename || ''}`.trim();
+    }
+    return `[DOC] ${md.filename || ''}`.trim();
+}
+
+function clearArenaAttachment() {
+    arenaAttachment = null;
+    const input = document.getElementById('arena-attachment');
+    if (input) input.value = '';
+    document.getElementById('arena-attachment-chip').style.display = 'none';
+    document.getElementById('arena-attachment-clear').style.display = 'none';
+}
+
+// Build the `content` field for a /v1/chat/completions message from prompt+attachment.
+// Returns: string for plain text or audio (transcript merged in), array of blocks for image/pdf/document.
+function buildArenaContent(prompt) {
+    const att = arenaAttachment;
+    if (!att) return prompt;
+    if (att.kind === 'audio') {
+        const t = (att.transcript || '').trim();
+        return t ? `Transcripción del audio:\n${t}\n\n${prompt}` : prompt;
+    }
+    if (att.kind === 'image') {
+        return [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: `data:${att.media_type};base64,${att.base64}` } },
+        ];
+    }
+    if (att.kind === 'pdf') {
+        return [
+            { type: 'text', text: prompt },
+            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: att.base64 } },
+        ];
+    }
+    // document (future docx/txt/md): send as document block; Anthropic gets it raw, others drop with warning.
+    return [
+        { type: 'text', text: prompt },
+        { type: 'document', source: { type: 'base64', media_type: att.media_type || 'application/octet-stream', data: att.base64 } },
+    ];
+}
+
 async function runArenaBattle() {
     const key = document.getElementById('arena-key').value.trim();
     const prompt = document.getElementById('arena-prompt').value.trim();
@@ -1688,9 +1768,13 @@ async function runArenaBattle() {
     // Determine category from battle dropdown
     const category = document.getElementById('arena-battle-category')?.value || 'custom';
 
-    // Create battle in DB
+    // Create battle in DB — include multimodal kind so scorecard can stratify by modality.
+    const inputKind = arenaAttachment ? arenaAttachment.kind : 'text';
+    const inputMetadata = arenaAttachment ? arenaAttachment.metadata : null;
     const battleRes = await api('/admin/api/arena/battles', 'POST', {
         prompt, category, temperature: temp, max_tokens: maxTokens,
+        input_kind: inputKind,
+        input_metadata: inputMetadata,
     });
     arenaBattleId = battleRes.id;
 
@@ -1741,17 +1825,19 @@ async function runArenaBattle() {
 
     const status = document.getElementById('arena-status');
 
+    const content = buildArenaContent(prompt);
+
     // Run local models sequentially
     for (const m of localModels) {
         status.textContent = `Ejecutando ${m.provider}/${m.model}...`;
-        await runArenaModel(m.idx, m.provider, m.model, prompt, temp, maxTokens, key);
+        await runArenaModel(m.idx, m.provider, m.model, content, temp, maxTokens, key, inputKind, inputMetadata);
     }
 
     // Run cloud models in parallel
     if (cloudModels.length > 0) {
         status.textContent = `Ejecutando ${cloudModels.length} modelos cloud en paralelo...`;
         await Promise.all(cloudModels.map(m =>
-            runArenaModel(m.idx, m.provider, m.model, prompt, temp, maxTokens, key)
+            runArenaModel(m.idx, m.provider, m.model, content, temp, maxTokens, key, inputKind, inputMetadata)
         ));
     }
 
@@ -1773,7 +1859,7 @@ async function runArenaBattle() {
 const arenaResultIds = {};
 const arenaResponseTexts = {};
 
-async function runArenaModel(idx, provider, model, prompt, temperature, maxTokens, apiKey) {
+async function runArenaModel(idx, provider, model, content, temperature, maxTokens, apiKey, inputKind, inputMetadata) {
     const controller = new AbortController();
     arenaAbortControllers.push(controller);
 
@@ -1800,7 +1886,7 @@ async function runArenaModel(idx, provider, model, prompt, temperature, maxToken
                 stream: false,
                 temperature,
                 max_tokens: maxTokens,
-                messages: [{ role: 'user', content: prompt }],
+                messages: [{ role: 'user', content }],
             }),
             signal: controller.signal,
         });
@@ -1843,6 +1929,8 @@ async function runArenaModel(idx, provider, model, prompt, temperature, maxToken
                 cost_usd: costUsd,
                 response_text: fullText,
                 status: 'success',
+                input_kind: inputKind || 'text',
+                input_metadata: inputMetadata || null,
             });
             arenaResultIds[idx] = resData.id;
         }
@@ -1861,6 +1949,8 @@ async function runArenaModel(idx, provider, model, prompt, temperature, maxToken
                     provider, model,
                     response_text: e.message,
                     status: 'error',
+                    input_kind: inputKind || 'text',
+                    input_metadata: inputMetadata || null,
                 });
                 arenaResultIds[idx] = resData.id;
             }

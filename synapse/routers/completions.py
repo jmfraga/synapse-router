@@ -21,7 +21,9 @@ from synapse.config import get_settings
 from synapse.database import get_db
 from synapse.models import ApiKey, Provider
 from synapse.services.auth import authenticate
+from synapse.services.content_blocks import detect_provider_kind, normalize_messages
 from synapse.services.litellm_router import get_router
+from synapse.services.model_capabilities import capability_metadata
 from synapse.services.sanitizers import sanitize_response_data, sanitize_stream_chunk
 
 logger = logging.getLogger(__name__)
@@ -76,6 +78,7 @@ async def list_models(
                 "object": "model",
                 "created": now,
                 "owned_by": provider.name,
+                "metadata": capability_metadata(model_id),
             }
             for model_id in all_models
         ]
@@ -159,6 +162,7 @@ async def chat_completions(
         kwargs.pop("temperature", None)
 
     messages = [m.model_dump() for m in request.messages]
+    messages = normalize_messages(messages, detect_provider_kind(model))
 
     # Pass api_key_id in metadata for the usage callback
     kwargs["metadata"] = {"api_key_id": api_key.id}

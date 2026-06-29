@@ -12,7 +12,7 @@ from typing import Optional
 import secrets
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -772,6 +772,8 @@ class ArenaBattleCreate(BaseModel):
     category: str = "custom"
     temperature: float = 0.7
     max_tokens: int = 2048
+    input_kind: str = "text"  # text | image | pdf | audio | mixed
+    input_metadata: Optional[dict] = None
 
 
 @router.post("/api/arena/battles")
@@ -781,6 +783,8 @@ async def create_arena_battle(data: ArenaBattleCreate, db: AsyncSession = Depend
         category=data.category,
         temperature=data.temperature,
         max_tokens=data.max_tokens,
+        input_kind=data.input_kind,
+        input_metadata=json.dumps(data.input_metadata) if data.input_metadata else None,
     )
     db.add(battle)
     await db.commit()
@@ -842,6 +846,8 @@ class ArenaResultCreate(BaseModel):
     cost_usd: float = 0.0
     response_text: str = ""
     status: str = "success"
+    input_kind: str = "text"
+    input_metadata: Optional[dict] = None
 
 
 @router.post("/api/arena/battles/{battle_id}/results")
@@ -863,10 +869,126 @@ async def create_arena_result(
         cost_usd=data.cost_usd,
         response_text=data.response_text,
         status=data.status,
+        input_kind=data.input_kind,
+        input_metadata=json.dumps(data.input_metadata) if data.input_metadata else None,
     )
     db.add(result)
     await db.commit()
     return {"status": "ok", "id": result.id}
+
+
+# ---------------------------------------------------------------------------
+# Arena multimodal — single upload endpoint that classifies, encodes, and
+# (for audio) transcribes. Returns a small JSON the UI can splice into the
+# /v1/chat/completions payload. NO file persisted to disk.
+# ---------------------------------------------------------------------------
+
+ARENA_UPLOAD_MAX_BYTES = 25 * 1024 * 1024  # 25 MB hard cap
+
+
+def _classify_attachment(mime: str, filename: str) -> str:
+    """Return arena input_kind for a given mime type / filename hint."""
+    m = (mime or "").lower()
+    name = (filename or "").lower()
+    if m.startswith("image/"):
+        return "image"
+    if m == "application/pdf" or name.endswith(".pdf"):
+        return "pdf"
+    if m.startswith("audio/") or name.endswith((".mp3", ".wav", ".m4a", ".ogg", ".webm")):
+        return "audio"
+    # Future: docx/txt/md/xlsx/csv → "document"
+    return "document"
+
+
+@router.post("/api/arena/upload-attachment")
+async def arena_upload_attachment(
+    request: Request,
+    file: UploadFile = File(...),
+):
+    """Encode an Arena attachment for use in a /v1/chat/completions payload.
+
+    Returns:
+      - {kind:"image", base64, media_type, metadata}
+      - {kind:"pdf", base64, metadata: {pages, ...}}
+      - {kind:"audio", transcript, metadata: {duration_s?, ...}}
+      - {kind:"document", ...} — for future doc types; currently unsupported
+        for non-Anthropic targets until a handler is added.
+    """
+    if not _check_basic_auth(request):
+        raise HTTPException(401, "Admin auth required", headers={"WWW-Authenticate": 'Basic realm="Synapse Admin"'})
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Empty upload")
+    if len(data) > ARENA_UPLOAD_MAX_BYTES:
+        raise HTTPException(413, f"Upload exceeds {ARENA_UPLOAD_MAX_BYTES // (1024*1024)} MB")
+
+    import base64 as _b64
+    mime = file.content_type or ""
+    kind = _classify_attachment(mime, file.filename or "")
+    metadata = {
+        "filename": file.filename or "",
+        "size_bytes": len(data),
+        "mime_type": mime,
+    }
+
+    if kind == "image":
+        return {
+            "kind": "image",
+            "base64": _b64.b64encode(data).decode("ascii"),
+            "media_type": mime or "image/jpeg",
+            "metadata": metadata,
+        }
+
+    if kind == "pdf":
+        # Count pages so the UI can show "PDF 3p"
+        try:
+            import pymupdf  # type: ignore
+            doc = pymupdf.open(stream=data, filetype="pdf")
+            metadata["pages"] = doc.page_count
+            doc.close()
+        except Exception as e:
+            logger.warning("arena_upload: pdf page count failed: %s", e)
+        return {
+            "kind": "pdf",
+            "base64": _b64.b64encode(data).decode("ascii"),
+            "media_type": "application/pdf",
+            "metadata": metadata,
+        }
+
+    if kind == "audio":
+        # Forward to local whisper-server, return the transcript only.
+        from synapse.routers.audio import WHISPER_SERVER_URL
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(
+                    f"{WHISPER_SERVER_URL}/inference",
+                    files={"file": (file.filename or "audio.wav", data, mime or "audio/wav")},
+                    data={"response_format": "json", "language": "es"},
+                )
+            if resp.status_code != 200:
+                raise HTTPException(502, f"Whisper server error: {resp.text[:200]}")
+            transcript = (resp.json() or {}).get("text", "").strip()
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception("arena_upload audio transcription failed")
+            raise HTTPException(502, f"Audio transcription failed: {e}")
+        return {
+            "kind": "audio",
+            "transcript": transcript,
+            "metadata": {**metadata, "transcript_chars": len(transcript)},
+        }
+
+    # Generic document: stored as base64 with a mime so the future handler
+    # (DOCX/TXT/MD/XLSX) can pick it up. For now non-Anthropic targets will
+    # drop it; Anthropic gets it as a document block.
+    return {
+        "kind": "document",
+        "base64": _b64.b64encode(data).decode("ascii"),
+        "media_type": mime or "application/octet-stream",
+        "metadata": metadata,
+    }
 
 
 class ArenaRating(BaseModel):

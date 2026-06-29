@@ -13,6 +13,10 @@ class ArenaBattle(Base):
     category: Mapped[str] = mapped_column(String(50), default="custom", index=True)
     temperature: Mapped[float] = mapped_column(Float, default=0.7)
     max_tokens: Mapped[int] = mapped_column(Integer, default=2048)
+    # Multimodal: text | image | pdf | audio | mixed
+    input_kind: Mapped[str] = mapped_column(String(20), default="text")
+    # JSON-encoded {filename, size_bytes, pages?, duration_s?, mime_type?, transcript?}
+    input_metadata: Mapped[str] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=datetime.datetime.utcnow, index=True
     )
@@ -43,6 +47,8 @@ class ArenaResult(Base):
     rating: Mapped[int] = mapped_column(Integer, nullable=True, default=None)
     response_text: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(20), default="success")
+    input_kind: Mapped[str] = mapped_column(String(20), default="text")
+    input_metadata: Mapped[str] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=datetime.datetime.utcnow
     )

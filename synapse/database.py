@@ -21,6 +21,11 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 _MIGRATIONS = [
     ("usage_logs", "smart_route_name", "VARCHAR(100) DEFAULT ''"),
     ("usage_logs", "intent", "VARCHAR(50) DEFAULT ''"),
+    # Arena multimodal: track which kind of input each battle/result used.
+    ("arena_battles", "input_kind", "VARCHAR(20) DEFAULT 'text'"),
+    ("arena_battles", "input_metadata", "TEXT DEFAULT NULL"),
+    ("arena_results", "input_kind", "VARCHAR(20) DEFAULT 'text'"),
+    ("arena_results", "input_metadata", "TEXT DEFAULT NULL"),
 ]
 
 
