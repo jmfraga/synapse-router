@@ -1665,8 +1665,34 @@ function stopArenaBattle() {
 // Arena multimodal attachment state (set by onArenaAttachmentChange).
 let arenaAttachment = null;  // { kind, base64?, media_type?, transcript?, metadata }
 
+// Downscale a JPEG/PNG to at most ARENA_IMG_MAX_DIM on the longest side, re-encode JPEG.
+// Avoids choking small local VL servers (mlx_vlm max-kv-size 4096) and cuts cloud token cost.
+const ARENA_IMG_MAX_DIM = 1280;
+const ARENA_IMG_JPEG_QUALITY = 0.85;
+
+async function _resizeImageFile(file) {
+    const bitmap = await createImageBitmap(file);
+    const longest = Math.max(bitmap.width, bitmap.height);
+    if (longest <= ARENA_IMG_MAX_DIM) {
+        // Small enough; still re-encode to JPEG for predictable size.
+        return file;
+    }
+    const scale = ARENA_IMG_MAX_DIM / longest;
+    const w = Math.round(bitmap.width * scale);
+    const h = Math.round(bitmap.height * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    const blob = await new Promise(resolve =>
+        canvas.toBlob(resolve, 'image/jpeg', ARENA_IMG_JPEG_QUALITY)
+    );
+    const newName = (file.name || 'image').replace(/\.[^.]+$/, '') + `_${w}x${h}.jpg`;
+    return new File([blob], newName, { type: 'image/jpeg' });
+}
+
 async function onArenaAttachmentChange(ev) {
-    const f = ev.target.files && ev.target.files[0];
+    let f = ev.target.files && ev.target.files[0];
     const chip = document.getElementById('arena-attachment-chip');
     const clearBtn = document.getElementById('arena-attachment-clear');
     const status = document.getElementById('arena-status');
@@ -1680,6 +1706,18 @@ async function onArenaAttachmentChange(ev) {
     chip.textContent = `Subiendo ${f.name}...`;
     clearBtn.style.display = '';
     try {
+        // Downscale images before upload — keeps local VL servers happy and cloud cost low.
+        if (f.type && f.type.startsWith('image/')) {
+            try {
+                const resized = await _resizeImageFile(f);
+                if (resized !== f) {
+                    chip.textContent = `Redimensionando ${f.name}...`;
+                    f = resized;
+                }
+            } catch (re) {
+                console.warn('arena image resize failed, sending original', re);
+            }
+        }
         const fd = new FormData();
         fd.append('file', f);
         const res = await fetch('/admin/api/arena/upload-attachment', { method: 'POST', body: fd });
