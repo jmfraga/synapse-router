@@ -18,6 +18,8 @@ build/
 # Database
 *.db
 *.db-journal
+*.db.bak-*
+synapse.db.bak-*
 
 # IDE
 .vscode/
