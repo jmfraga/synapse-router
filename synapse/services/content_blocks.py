@@ -108,11 +108,14 @@ DocumentHandler = Callable[[str, ProviderKind, dict], list[dict]]
 
 
 def _handle_pdf(data_b64: str, target: ProviderKind, opts: dict) -> list[dict]:
+    # Always render to OpenAI-shape image_url blocks — litellm handles the
+    # Anthropic translation for us. Sending Anthropic-shape directly fails
+    # litellm's OpenAI validator.
     return pdf_to_image_blocks(
         data_b64,
         max_pages=opts.get("max_pdf_pages", PDF_MAX_PAGES_DEFAULT),
         dpi=opts.get("pdf_dpi", PDF_DPI_DEFAULT),
-        target=target,
+        target="openai",
     )
 
 
@@ -191,31 +194,34 @@ def _normalize_block(
     target: ProviderKind,
     opts: dict,
 ) -> list[dict]:
-    """Normalize a single content block; may expand to multiple (e.g. PDF → N images)."""
+    """Normalize a single content block; may expand to multiple (e.g. PDF → N images).
+
+    Canonical shape inside Synapse is OpenAI. litellm receives OpenAI-shape and
+    handles the Anthropic-native translation itself (sending `type=image` directly
+    fails litellm's OpenAI validator — observed 2026-06-28).
+    """
     btype = block.get("type")
 
-    # Image blocks both directions
+    # Images: always canonicalize to OpenAI image_url regardless of target.
     if btype in ("image", "image_url"):
-        if target == "anthropic":
-            return [_to_anthropic_image(block)]
         return [_to_openai_image(block)]
 
     # Document blocks: dispatch by mime_type
     if btype == "document":
         source = block.get("source") or {}
         media_type = source.get("media_type", "application/pdf")
-        # Anthropic native: pass-through (only it understands document blocks).
-        if target == "anthropic":
-            return [block]
+        data_b64 = source.get("data", "")
+        # Anthropic native: rasterize PDF and send as image_url blocks (canonical),
+        # which litellm forwards to Anthropic as image content. Native `document`
+        # blocks aren't supported by litellm 1.63.11's OpenAI-shape validator.
+        if not data_b64:
+            return []
         handler = DOCUMENT_HANDLERS.get(media_type)
         if handler is None:
             logger.warning(
                 "content_blocks: no handler for document mime_type=%s — dropping block",
                 media_type,
             )
-            return []
-        data_b64 = source.get("data", "")
-        if not data_b64:
             return []
         return handler(data_b64, target, opts)
 

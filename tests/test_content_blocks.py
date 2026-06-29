@@ -89,7 +89,9 @@ def test_pdf_max_pages_caps(two_page_pdf_b64):
 # normalize_messages — image conversion
 # ---------------------------------------------------------------------------
 
-def test_anthropic_image_to_openai(small_png_b64):
+def test_anthropic_shape_canonicalized_to_openai(small_png_b64):
+    """Client sends Anthropic-native image block → normalizer converts to OpenAI image_url
+    (canonical form). Applies to BOTH targets — litellm handles the Anthropic translation."""
     messages = [{
         "role": "user",
         "content": [
@@ -100,14 +102,16 @@ def test_anthropic_image_to_openai(small_png_b64):
             },
         ],
     }]
-    out = normalize_messages(messages, "openai")
-    blocks = out[0]["content"]
-    assert blocks[0] == {"type": "text", "text": "describe"}
-    assert blocks[1]["type"] == "image_url"
-    assert blocks[1]["image_url"]["url"] == f"data:image/png;base64,{small_png_b64}"
+    for target in ("openai", "anthropic"):
+        out = normalize_messages(messages, target)
+        blocks = out[0]["content"]
+        assert blocks[0] == {"type": "text", "text": "describe"}
+        assert blocks[1]["type"] == "image_url", f"target={target}"
+        assert blocks[1]["image_url"]["url"] == f"data:image/png;base64,{small_png_b64}"
 
 
-def test_openai_image_url_to_anthropic(small_png_b64):
+def test_openai_image_url_passthrough(small_png_b64):
+    """image_url stays image_url for both targets — canonical form."""
     messages = [{
         "role": "user",
         "content": [
@@ -118,18 +122,22 @@ def test_openai_image_url_to_anthropic(small_png_b64):
             },
         ],
     }]
-    out = normalize_messages(messages, "anthropic")
-    blocks = out[0]["content"]
-    assert blocks[1]["type"] == "image"
-    assert blocks[1]["source"]["media_type"] == "image/png"
-    assert blocks[1]["source"]["data"] == small_png_b64
+    for target in ("openai", "anthropic"):
+        out = normalize_messages(messages, target)
+        blocks = out[0]["content"]
+        assert blocks[1]["type"] == "image_url", f"target={target}"
+        assert blocks[1]["image_url"]["url"].endswith(small_png_b64)
 
 
 # ---------------------------------------------------------------------------
 # normalize_messages — PDF document
 # ---------------------------------------------------------------------------
 
-def test_pdf_document_anthropic_passthrough(two_page_pdf_b64):
+def test_pdf_document_rasterized_for_both_targets(two_page_pdf_b64):
+    """PDF documents are rasterized to OpenAI image_url for BOTH Anthropic and
+    OpenAI targets. litellm 1.63.11 only accepts OpenAI-shape content; the
+    `document` block type fails its validator, so we rasterize and let litellm
+    forward image_url blocks (which it translates internally for Anthropic)."""
     doc_block = {
         "type": "document",
         "source": {
@@ -139,27 +147,14 @@ def test_pdf_document_anthropic_passthrough(two_page_pdf_b64):
         },
     }
     messages = [{"role": "user", "content": [{"type": "text", "text": "resume"}, doc_block]}]
-    out = normalize_messages(messages, "anthropic")
-    assert out[0]["content"][1] == doc_block  # untouched
-
-
-def test_pdf_document_openai_rasterized(two_page_pdf_b64):
-    doc_block = {
-        "type": "document",
-        "source": {
-            "type": "base64",
-            "media_type": "application/pdf",
-            "data": two_page_pdf_b64,
-        },
-    }
-    messages = [{"role": "user", "content": [{"type": "text", "text": "resume"}, doc_block]}]
-    out = normalize_messages(messages, "openai", max_pdf_pages=5)
-    content = out[0]["content"]
-    # 1 text block + 2 pages
-    assert len(content) == 3
-    assert content[0]["type"] == "text"
-    assert content[1]["type"] == "image_url"
-    assert content[2]["type"] == "image_url"
+    for target in ("openai", "anthropic"):
+        out = normalize_messages(messages, target, max_pdf_pages=5)
+        content = out[0]["content"]
+        # 1 text block + 2 pages
+        assert len(content) == 3, f"target={target}"
+        assert content[0]["type"] == "text"
+        assert content[1]["type"] == "image_url"
+        assert content[2]["type"] == "image_url"
 
 
 def test_unknown_document_mime_dropped():
@@ -222,7 +217,8 @@ def test_idempotent_image(small_png_b64):
     assert once == twice
 
 
-def test_idempotent_pdf_anthropic(two_page_pdf_b64):
+def test_idempotent_pdf(two_page_pdf_b64):
+    """After first pass PDF becomes image_url blocks; second pass leaves them alone."""
     messages = [{
         "role": "user",
         "content": [{
@@ -230,6 +226,7 @@ def test_idempotent_pdf_anthropic(two_page_pdf_b64):
             "source": {"type": "base64", "media_type": "application/pdf", "data": two_page_pdf_b64},
         }],
     }]
-    once = normalize_messages(messages, "anthropic")
-    twice = normalize_messages(once, "anthropic")
-    assert once == twice
+    for target in ("openai", "anthropic"):
+        once = normalize_messages(messages, target)
+        twice = normalize_messages(once, target)
+        assert once == twice, f"target={target}"
