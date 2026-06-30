@@ -14,7 +14,7 @@ Synapse se encarga de:
 ## Conexión rápida
 
 ```
-Base URL:  http://100.72.169.113:8800
+Base URL:  http://<tailscale-ip>:8800
 API Key:   (solicitar al admin — formato syn-XXXXX)
 ```
 
@@ -24,7 +24,7 @@ API Key:   (solicitar al admin — formato syn-XXXXX)
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://100.72.169.113:8800/v1",
+    base_url="http://<tailscale-ip>:8800/v1",
     api_key="syn-TU-KEY-AQUI",
 )
 
@@ -69,7 +69,7 @@ response = client.chat.completions.create(
 ### Ejemplo: curl
 
 ```bash
-curl http://100.72.169.113:8800/v1/chat/completions \
+curl http://<tailscale-ip>:8800/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer syn-TU-KEY-AQUI" \
   -d '{
@@ -84,7 +84,7 @@ curl http://100.72.169.113:8800/v1/chat/completions \
 import OpenAI from 'openai';
 
 const client = new OpenAI({
-  baseURL: 'http://100.72.169.113:8800/v1',
+  baseURL: 'http://<tailscale-ip>:8800/v1',
   apiKey: 'syn-TU-KEY-AQUI',
 });
 
@@ -173,7 +173,7 @@ response.stream_to_file("output.wav")
 
 ## Admin panel
 
-El panel de administración está en `http://100.72.169.113:8800/admin/` (requiere credenciales).
+El panel de administración está en `http://<tailscale-ip>:8800/admin/` (requiere credenciales).
 
 Desde ahí se puede:
 - Ver estado de todos los providers

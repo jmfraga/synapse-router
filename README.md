@@ -192,7 +192,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jmfraga.whisper-serv
 ### Listar Modelos
 
 ```bash
-curl http://100.72.169.113:8800/v1/models
+curl http://<tailscale-ip>:8800/v1/models
 ```
 
 Devuelve la lista completa de modelos disponibles en formato OpenAI. Incluye modelos de todos los providers habilitados y Smart Routes como modelos virtuales.
@@ -200,7 +200,7 @@ Devuelve la lista completa de modelos disponibles en formato OpenAI. Incluye mod
 ### Chat Completions
 
 ```bash
-curl http://100.72.169.113:8800/v1/chat/completions \
+curl http://<tailscale-ip>:8800/v1/chat/completions \
   -H "Authorization: Bearer syn-tu-api-key" \
   -H "Content-Type: application/json" \
   -d '{"model": "auto", "messages": [{"role": "user", "content": "Hola"}]}'
@@ -222,7 +222,7 @@ const client = new OpenAI({
 ### Transcripción (STT)
 
 ```bash
-curl http://100.72.169.113:8800/v1/audio/transcriptions \
+curl http://<tailscale-ip>:8800/v1/audio/transcriptions \
   -H "Authorization: Bearer syn-tu-api-key" \
   -F "file=@audio.wav" \
   -F "model=whisper-large-v3" \
@@ -232,7 +232,7 @@ curl http://100.72.169.113:8800/v1/audio/transcriptions \
 ### Texto a Voz (TTS)
 
 ```bash
-curl http://100.72.169.113:8800/v1/audio/speech \
+curl http://<tailscale-ip>:8800/v1/audio/speech \
   -H "Authorization: Bearer syn-tu-api-key" \
   -H "Content-Type: application/json" \
   -d '{"model": "tts-local", "input": "Hola mundo", "voice": "paulina"}' \

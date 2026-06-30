@@ -19,7 +19,7 @@ Synapse v2 (litellm.Router) está sano en lo arquitectónico: auth Bearer con ha
 ### F-2. Bind en todas las interfaces con endpoints sin auth — [ALTA]
 - **Dimensión**: seguridad
 - **Evidencia**: `lsof -iTCP:8800` → `Python 715 ... TCP *:8800 (LISTEN)`. `.env` → `SYNAPSE_HOST=0.0.0.0`. Sin auth: `/health` y `/metrics` (main.py:55-119, expone modelos/rutas/volúmenes) y **`/v1/models`** (completions.py:35-36 — no tiene `Depends(authenticate)`, a diferencia de `/v1/chat/completions`). El admin usa HTTP Basic sobre HTTP plano (admin.py:45-47), visible para toda la LAN de casa, no solo Tailscale.
-- **Propuesta**: bind a la IP de Tailscale (100.72.169.113) o a 127.0.0.1 + `tailscale serve`; y agregar `Depends(authenticate)` a `/v1/models`. `/health` puede quedar abierto (es el target natural de un watchdog).
+- **Propuesta**: bind a la IP de Tailscale (<tailscale-ip>) o a 127.0.0.1 + `tailscale serve`; y agregar `Depends(authenticate)` a `/v1/models`. `/health` puede quedar abierto (es el target natural de un watchdog).
 - **Esfuerzo**: trivial
 - **Estado**: [x] implementado 2026-06-11 · commit d0c5f2c (auth en /v1/models; bind a Tailscale documentado en commit body como cambio en .env no trackeado)
 
@@ -35,7 +35,7 @@ Synapse v2 (litellm.Router) está sano en lo arquitectónico: auth Bearer con ha
 - **Evidencia**: `README.md` (sección Features): "Smart Routes — ruteo por intención con clasificador LLM local (llama3.1:8b)". Contradice `synapse/routers/completions.py:3`: `"v2: powered by litellm.Router — no classifier, no Smart Routes"`. El clasificador no corre en ningún request (cero referencias en el path de `/v1/chat/completions`); las SmartRoutes hoy solo sobreviven como aliases estáticos de modelo (litellm_router.py:171-252), sin clasificación por intención.
 - **Propuesta**: actualizar README a la arquitectura v2 (router litellm, aliases, sin clasificador). Riesgo concreto si no: una sesión futura "optimiza" o "repara" un clasificador inexistente, o reporta su costo por request (que es 0).
 - **Esfuerzo**: moderado
-- **Estado**: [x] implementado 2026-06-23 · README.md sección "LLM Routing" reescrita a v2 (litellm.Router + Smart Routes como aliases estáticos + sticky fallback MLX); URLs de ejemplo localhost:8800 → 100.72.169.113:8800
+- **Estado**: [x] implementado 2026-06-23 · README.md sección "LLM Routing" reescrita a v2 (litellm.Router + Smart Routes como aliases estáticos + sticky fallback MLX); URLs de ejemplo localhost:8800 → <tailscale-ip>:8800
 
 ### F-5. Excepciones internas de providers expuestas al cliente — [MEDIA]
 - **Dimensión**: seguridad

@@ -18,12 +18,12 @@ Hacer que Synapse Router funcione como gateway de modelos para OpenClaw:
 - Chat completions SÍ funcionan (MiniMax, Haiku, Sonnet probados directamente)
 
 ## Sandbox
-- RPi5 Prototipos: `jmfraga@100.101.100.7` (8GB RAM, 99GB disco, Debian aarch64)
+- RPi5 Prototipos: `jmfraga@<tailscale-ip>` (8GB RAM, 99GB disco, Debian aarch64)
 - Instalar OpenClaw mínimo con 1 agente de prueba apuntando a Synapse
 - Validar end-to-end: agente → Synapse → modelo → respuesta con tools
 
 ## Reglas ESTRICTAS
-1. **NO SSH a 100.71.128.102** (Pi producción OpenClaw) — NUNCA
+1. **NO SSH a <tailscale-ip>** (Pi producción OpenClaw) — NUNCA
 2. **NO modificar** MedExpert ni Maya
 3. **NO cambiar** API keys existentes en .env o providers
 4. **Modelos para pruebas**: Groq, Nvidia, MiniMax = libre. Anthropic = solo Haiku. OpenAI = solo modelos baratos. Ollama = sin restricción
@@ -76,9 +76,9 @@ Las keys ya están en el archivo .env — NO las modifiques, solo úsalas.
 - El bug reportado era "TTS markup en vez de API tool calls"
 
 ### Task 3: Setup sandbox OpenClaw en Pi Prototipos
-- SSH: `jmfraga@100.101.100.7`
+- SSH: `jmfraga@<tailscale-ip>`
 - Instalar Node.js + OpenClaw mínimo
-- Configurar 1 agente apuntando a Synapse en M4 (100.72.169.113:8800)
+- Configurar 1 agente apuntando a Synapse en M4 (<tailscale-ip>:8800)
 - Probar interacción completa
 
 ### Task 4: Test end-to-end con tools
