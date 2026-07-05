@@ -8,13 +8,12 @@ Synapse v2 (litellm.Router) está sano en lo arquitectónico: auth Bearer con ha
 ## Hallazgos
 
 ### F-1. API keys de providers en texto plano en SQLite legible + backups — [ALTA]
-<!-- Estado: [x] completo 2026-06-23 · (1) chmod 600 .env synapse.db synapse.db.bak-* (2026-06-11); (2) api_key_value vaciado en 7 cloud providers (anthropic/gemini/groq/nvidia/openai/perplexity/minimax) — env es fuente única; minimax migrado de DB-only a SYNAPSE_MINIMAX_API_KEY; mlx/mlx-heavy mantienen placeholder "not-needed". Backup pre-cleanup: synapse.db.bak-pre-f1-20260623. -->
 
 - **Dimensión**: seguridad
 - **Evidencia**: `sqlite3 synapse.db "SELECT name, ..."` → 8 providers con key `DB-STORED` (groq, nvidia, anthropic, openai, gemini, perplexity, minimax, mlx). `stat -f '%Sp' synapse.db` → `-rw-r--r--` (644). Mismas keys duplicadas en 3 backups del dir: `synapse.db.bak-202604121027`, `synapse.db.bak-phi4-final-20260504193203`, `synapse.db.bak-pre-phi4-cleanup-202605041837`. `.env` también 644 con las mismas keys (tercera copia). `synapse/models/provider.py:17` (`api_key_value` en Text plano).
 - **Propuesta**: (1) `chmod 600 .env synapse.db synapse.db.bak-*`; (2) elegir UNA fuente de verdad para keys — recomiendo env (`.env` 600) y vaciar `api_key_value` en DB, porque hoy `_get_key()` (litellm_router.py:287-293) prioriza DB y la copia env puede quedar stale sin que nadie lo note; (3) borrar o mover los 3 backups (son de abril/mayo, pre-cleanup ya consumado).
 - **Esfuerzo**: trivial
-- **Estado**: [ ] pendiente
+- **Estado**: [x] completo 2026-06-23 (re-verificado 2026-07-02) · (1) `stat` confirma `.env`, `synapse.db` y los 4 `synapse.db.bak-*` todos en `-rw-------` (600); (2) `api_key_value` vaciado en 7 cloud providers (env fuente única); minimax migrado a `SYNAPSE_MINIMAX_API_KEY`; mlx/mlx-heavy con placeholder "not-needed". Backup pre-cleanup: `synapse.db.bak-pre-f1-20260623`. (El marcador "[ ] pendiente" era estadísticamente stale; corregido hoy.)
 
 ### F-2. Bind en todas las interfaces con endpoints sin auth — [ALTA]
 - **Dimensión**: seguridad
@@ -72,6 +71,13 @@ Synapse v2 (litellm.Router) está sano en lo arquitectónico: auth Bearer con ha
 - **Esfuerzo**: moderado
 - **Estado**: [x] implementado 2026-06-23 · (1) ~/scripts/synapse-watchdog.sh + com.jmfraga.synapse-watchdog.plist (StartInterval 300s, curl /health -m 5, launchctl kickstart -k si falla); (2) SmartRoutes deshabilitadas: OpenClaw-Core, PM-Smart, Chappie-Smart, Echo-Smart, Argus-Smart. Vivas: Iris, IrisMed, Maya, MedExpert-Onco, Phoenix, Productivity, essayrubric-eval, sandbox-*
 
+### F-10. Bypass de auth admin por header X-Forwarded-Email forjable en el tailnet — [ALTA]
+- **Dimensión**: seguridad
+- **Evidencia**: `require_admin` (admin.py:59) confía en la identidad del proxy con `if request.headers.get("x-forwarded-email"): return` ANTES de exigir Basic Auth. Pero el upstream `:8800` sigue **directamente alcanzable en el tailnet** (`netstat` → `100.72.169.113.8800 LISTEN`) — el oauth2-proxy vive aparte en `:8811` (`fleet-sso-poc/prod/synapse-admin-proxy-run.sh`). El proxy NO inyecta ningún secreto compartido al upstream (a diferencia del proxy de kanban, que sí usa `--basic-auth-password` con `secrets/sso-shared-secret.txt`), así que el header no autentica nada: cualquier cliente del tailnet lo puede forjar. Probado en vivo el 2026-07-02: `curl :8800/admin/` → **401**; `curl -H 'X-Forwarded-Email: attacker@evil.com' :8800/admin/` → **200** (acceso total a `/admin`, incl. `PUT /admin/api/providers/{id}/key` que escribe API keys). El bypass es una **regresión**: antes F-2 dejó Basic Auth como única puerta; ahora un header trivial la salta.
+- **Propuesta**: no confiar en `x-forwarded-email` a secas. Opciones: (a) exigir que el proxy inyecte un secreto compartido (patrón kanban: `--set-xauthrequest` + `--basic-auth-password`, o un header `X-Proxy-Secret` leído de `secrets/sso-shared-secret.txt`) y validarlo con `secrets.compare_digest` en `require_admin` ANTES de aceptar el email; (b) si no, eliminar el atajo del header y mantener Basic Auth como gate real (el SSO sigue siendo la puerta bonita, pero la seguridad efectiva no depende de un header forjable). El contrato `/v1` no se toca (ya está fuera del gate vía `--skip-auth-route="^/v1"`).
+- **Esfuerzo**: trivial
+- **Estado**: [x] RESUELTO (verificado 2026-07-04) vía opción (b) — se eliminó el atajo `x-forwarded-email` de `require_admin` (Basic Auth es el gate real). Repro exacto del ataque: `:8800/admin/` con `X-Forwarded-Email: attacker@evil.com` → **401** (antes 200), y `PUT /admin/api/providers/1/key` con header forjado → **401**. El SSO :8811 sigue siendo la puerta bonita; la seguridad efectiva ya no depende de un header forjable.
+
 ## Notas positivas (verificadas, sin hallazgo)
 - **Auth de API sólida**: Bearer token con SHA-256 + flag `is_active` en DB (`services/auth.py:27-35`); admin con `secrets.compare_digest` (admin.py:46-47) — no cambiar.
 - **Sin secretos en git ni en logs**: `.gitignore` cubre `.env` y `*.db`; `git ls-files` confirma que no están trackeados; grep de patrones de keys (`sk-ant|nvapi-|gsk_|pplx-|AIzaSy`) en los 5.5MB de logs launchd → 0 hits.
@@ -82,3 +88,16 @@ Synapse v2 (litellm.Router) está sano en lo arquitectónico: auth Bearer con ha
 
 ## Implementado en auditorías previas
 (Primera auditoría — vacío.)
+
+## Cross-cutting: SSO (ADR-004) — Fase 1 IMPLEMENTADA 2026-07-02
+El gateway SSO ya está VIVO: oauth2-proxy nativo en `:8811` (OIDC →
+`auth.docfraga.com/realms/fleet`, Keycloak/Google) delante de `/admin`; el
+contrato `/v1` (OpenAI-compat) quedó fuera del gate con `--skip-auth-route="^/v1"`,
+intacto. `require_admin` ahora confía en `X-Forwarded-Email` del proxy y conserva
+Basic Auth como fallback para acceso directo por Tailscale.
+- ✅ Puerta autenticada de identidad única para el admin (antes: Basic Auth suelto).
+- ✅ El contrato `/v1` no cambió (clientes OpenAI-compat siguen funcionando).
+- 🔴 **PERO** el upstream `:8800` sigue directamente alcanzable en el tailnet y el
+  atajo `x-forwarded-email` es forjable — ver **F-10**. El auth NO está
+  "resuelto-por-gateway" hasta que el upstream deje de confiar en un header sin
+  secreto. La Fase 1 agregó identidad; falta cerrar la puerta trasera.
