@@ -320,3 +320,45 @@ def test_audio_whisper_error_propagates(monkeypatch):
     }]
     with pytest.raises(RuntimeError):
         normalize_messages(messages, "openai")
+
+
+# ---------------------------------------------------------------------------
+# Audio policy: native passthrough vs transcribe
+# ---------------------------------------------------------------------------
+
+def test_audio_native_mode_passes_through():
+    """audio_mode=native must forward the input_audio block untouched (no whisper)."""
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "¿qué tono percibes?"},
+            {"type": "input_audio", "input_audio": {"data": "ZmFrZQ==", "format": "wav"}},
+        ],
+    }]
+    out = normalize_messages(messages, "openai", audio_mode="native")
+    blocks = out[0]["content"]
+    assert blocks[1]["type"] == "input_audio"
+    assert blocks[1]["input_audio"]["data"] == "ZmFrZQ=="
+
+
+def test_audio_anthropic_variant_native_canonicalized():
+    """The {type:'audio', source:...} variant becomes canonical input_audio in native mode."""
+    messages = [{
+        "role": "user",
+        "content": [{"type": "audio", "source": {"data": "ZmFrZQ==", "media_type": "audio/mp3"}}],
+    }]
+    out = normalize_messages(messages, "openai", audio_mode="native")
+    block = out[0]["content"][0]
+    assert block["type"] == "input_audio"
+    assert block["input_audio"]["format"] == "mp3"
+
+
+def test_audio_default_mode_still_transcribes(monkeypatch):
+    from synapse.services import content_blocks as cb
+    monkeypatch.setattr(cb, "transcribe_audio_b64", lambda d, **kw: "texto plano")
+    messages = [{
+        "role": "user",
+        "content": [{"type": "input_audio", "input_audio": {"data": "ZmFrZQ==", "format": "wav"}}],
+    }]
+    out = normalize_messages(messages, "openai")
+    assert out[0]["content"][0]["type"] == "text"

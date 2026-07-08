@@ -23,7 +23,7 @@ from synapse.models import ApiKey, Provider
 from synapse.services.auth import authenticate
 from synapse.services.content_blocks import detect_provider_kind, normalize_messages
 from synapse.services.litellm_router import get_router
-from synapse.services.model_capabilities import capability_metadata
+from synapse.services.model_capabilities import audio_input_mode, capability_metadata
 from synapse.services.sanitizers import sanitize_response_data, sanitize_stream_chunk
 
 logger = logging.getLogger(__name__)
@@ -162,12 +162,25 @@ async def chat_completions(
         kwargs.pop("temperature", None)
 
     messages = [m.model_dump() for m in request.messages]
+    # Resolve where audio gets handled: per-request `audio_input` override >
+    # per-key audio_policy > default transcribe. "native" only holds if the
+    # target model actually accepts audio — otherwise fall back to whisper.
+    requested_policy = (
+        request.model_dump().get("audio_input")
+        or getattr(api_key, "audio_policy", None)
+        or "transcribe"
+    )
+    audio_mode = "transcribed"
+    if requested_policy == "native" and audio_input_mode(model) == "native":
+        audio_mode = "native"
+
     # normalize_messages does blocking I/O (remote image fetch, whisper transcribe)
     # — run off the event loop. Fast path: plain-string contents skip the hop.
     if any(isinstance(m.get("content"), list) for m in messages):
         try:
             messages = await asyncio.to_thread(
-                normalize_messages, messages, detect_provider_kind(model)
+                normalize_messages, messages, detect_provider_kind(model),
+                audio_mode=audio_mode,
             )
         except Exception as e:
             request_id = uuid.uuid4().hex[:12]

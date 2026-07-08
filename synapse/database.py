@@ -26,6 +26,8 @@ _MIGRATIONS = [
     ("arena_battles", "input_metadata", "TEXT DEFAULT NULL"),
     ("arena_results", "input_kind", "VARCHAR(20) DEFAULT 'text'"),
     ("arena_results", "input_metadata", "TEXT DEFAULT NULL"),
+    # Audio policy per key: transcribe (whisper gateway) | native (passthrough).
+    ("api_keys", "audio_policy", "VARCHAR(20) DEFAULT 'transcribe'"),
 ]
 
 

@@ -443,6 +443,9 @@ class CreateKeyRequest(BaseModel):
     allowed_models: str = "*"
     rate_limit_rpm: int = 60
     smart_route_ids: list[int] = []
+    # "transcribe" (whisper gateway, default) | "native" (audio pasa al modelo
+    # si lo soporta — clientes que necesitan prosodia/intención: Maya, HC)
+    audio_policy: str = "transcribe"
 
 
 class UpdateKeyRequest(BaseModel):
@@ -451,6 +454,10 @@ class UpdateKeyRequest(BaseModel):
     allowed_models: Optional[str] = None
     rate_limit_rpm: Optional[int] = None
     smart_route_ids: Optional[list[int]] = None
+    audio_policy: Optional[str] = None
+
+
+_AUDIO_POLICIES = ("transcribe", "native")
 
 
 @router.post("/api/keys")
@@ -463,6 +470,7 @@ async def create_api_key(data: CreateKeyRequest, db: AsyncSession = Depends(get_
         service=data.service,
         allowed_models=data.allowed_models,
         rate_limit_rpm=data.rate_limit_rpm,
+        audio_policy=data.audio_policy if data.audio_policy in _AUDIO_POLICIES else "transcribe",
     )
     db.add(key)
     await db.flush()  # get key.id
@@ -499,6 +507,7 @@ async def list_api_keys(db: AsyncSession = Depends(get_db)):
             "id": k.id, "name": k.name, "key_prefix": k.key_prefix,
             "service": k.service, "is_active": k.is_active,
             "allowed_models": k.allowed_models, "rate_limit_rpm": k.rate_limit_rpm,
+            "audio_policy": getattr(k, "audio_policy", None) or "transcribe",
             "smart_routes": key_routes.get(k.id, []),
         }
         for k in keys
@@ -521,6 +530,10 @@ async def update_api_key(key_id: int, data: UpdateKeyRequest, db: AsyncSession =
         key.allowed_models = data.allowed_models
     if data.rate_limit_rpm is not None:
         key.rate_limit_rpm = data.rate_limit_rpm
+    if data.audio_policy is not None:
+        if data.audio_policy not in _AUDIO_POLICIES:
+            raise HTTPException(400, f"audio_policy must be one of {_AUDIO_POLICIES}")
+        key.audio_policy = data.audio_policy
 
     # Update smart route associations
     if data.smart_route_ids is not None:

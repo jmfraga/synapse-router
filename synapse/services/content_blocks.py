@@ -195,28 +195,34 @@ def transcribe_audio_b64(data_b64: str, *, audio_format: str = "wav", language: 
         raise RuntimeError("whisper-server returned invalid JSON") from e
 
 
-def _handle_audio_block(block: dict) -> list[dict]:
-    """Normalize an audio block to a text block with its transcript.
-
-    Accepts OpenAI shape {type:"input_audio", input_audio:{data, format}} and a
-    defensive {type:"audio", source:{data, media_type}} variant. Transcribing at
-    the gateway makes audio universal: any chat model behind Synapse can take
-    voice notes without native audio support.
-    """
-    data_b64 = ""
-    audio_format = "wav"
+def _extract_audio(block: dict) -> tuple[str, str]:
+    """Return (data_b64, format) from an OpenAI input_audio block or the
+    defensive {type:"audio", source:{data, media_type}} variant."""
     if block.get("type") == "input_audio":
         ia = block.get("input_audio") or {}
-        data_b64 = ia.get("data", "")
-        audio_format = ia.get("format", "wav")
-    elif block.get("type") == "audio":
+        return ia.get("data", ""), ia.get("format", "wav")
+    if block.get("type") == "audio":
         src = block.get("source") or {}
-        data_b64 = src.get("data", "")
         media_type = src.get("media_type", "audio/wav")
-        audio_format = media_type.split("/")[-1]
+        return src.get("data", ""), media_type.split("/")[-1]
+    return "", "wav"
+
+
+def _handle_audio_block(block: dict, audio_mode: str = "transcribed") -> list[dict]:
+    """Normalize an audio block according to the resolved audio mode.
+
+    "transcribed" (default): transcribe at the gateway via whisper and splice
+    the transcript as text — universal, any chat model takes voice notes.
+    "native": pass the audio through as a canonical OpenAI input_audio block —
+    the model hears prosody/tone/intent. The caller must have verified the
+    target model actually supports native audio (model_capabilities.audio_input_mode).
+    """
+    data_b64, audio_format = _extract_audio(block)
     if not data_b64:
         logger.warning("content_blocks: empty audio block — dropping")
         return []
+    if audio_mode == "native":
+        return [{"type": "input_audio", "input_audio": {"data": data_b64, "format": audio_format}}]
     transcript = transcribe_audio_b64(data_b64, audio_format=audio_format)
     if not transcript:
         return [{"type": "text", "text": "[Audio adjunto sin contenido transcribible]"}]
@@ -299,9 +305,10 @@ def _normalize_block(
     if btype in ("image", "image_url"):
         return [_to_openai_image(block)]
 
-    # Audio: transcribe at the gateway → text block (universal across models).
+    # Audio: transcribe at the gateway (default) or pass through natively
+    # when the resolved audio_mode is "native" (prosody-aware models).
     if btype in ("input_audio", "audio"):
-        return _handle_audio_block(block)
+        return _handle_audio_block(block, opts.get("audio_mode", "transcribed"))
 
     # Document blocks: dispatch by mime_type
     if btype == "document":
@@ -340,6 +347,7 @@ def normalize_messages(
     *,
     max_pdf_pages: int = PDF_MAX_PAGES_DEFAULT,
     pdf_dpi: int = PDF_DPI_DEFAULT,
+    audio_mode: str = "transcribed",
 ) -> list[dict]:
     """Normalize a chat-completions `messages` payload for a target provider.
 
@@ -347,8 +355,10 @@ def normalize_messages(
     content is returned unchanged. Block lists are walked, images converted
     to the target shape, PDF document blocks rasterized for non-Anthropic
     providers, cache_control stripped when destination isn't Anthropic.
+    audio_mode: "transcribed" (whisper at the gateway) or "native" (pass
+    input_audio upstream — caller verified the model supports it).
     """
-    opts = {"max_pdf_pages": max_pdf_pages, "pdf_dpi": pdf_dpi}
+    opts = {"max_pdf_pages": max_pdf_pages, "pdf_dpi": pdf_dpi, "audio_mode": audio_mode}
     out: list[dict] = []
     for msg in messages:
         content = msg.get("content")

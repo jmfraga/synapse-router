@@ -18,6 +18,12 @@ class ApiKey(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     allowed_models: Mapped[str] = mapped_column(Text, default="*")  # comma-separated or *
     rate_limit_rpm: Mapped[int] = mapped_column(default=60)  # requests per minute
+    # Where audio gets resolved for this key's requests:
+    #   "transcribe" — gateway transcribes input_audio via whisper (universal, default)
+    #   "native"     — pass input_audio to the model when it supports audio natively
+    #                  (prosody/intent-aware clients like Maya, HealthCompanion);
+    #                  falls back to transcribe if the target model can't hear.
+    audio_policy: Mapped[str] = mapped_column(String(20), default="transcribe")
     smart_route_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("smart_routes.id"), nullable=True, default=None
     )  # legacy: single smart route (migrated to junction table)
