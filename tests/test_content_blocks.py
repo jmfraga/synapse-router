@@ -230,3 +230,93 @@ def test_idempotent_pdf(two_page_pdf_b64):
         once = normalize_messages(messages, target)
         twice = normalize_messages(once, target)
         assert once == twice, f"target={target}"
+
+
+# ---------------------------------------------------------------------------
+# Text-family documents (TXT/MD/CSV/JSON)
+# ---------------------------------------------------------------------------
+
+def test_text_document_spliced_as_text():
+    import base64 as _b64
+    md = "# Reporte\n\nHallazgos: glucosa 95 mg/dL."
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "resume el documento"},
+            {"type": "document", "source": {
+                "type": "base64", "media_type": "text/markdown",
+                "data": _b64.b64encode(md.encode()).decode(),
+            }},
+        ],
+    }]
+    out = normalize_messages(messages, "openai")
+    blocks = out[0]["content"]
+    assert len(blocks) == 2
+    assert blocks[1]["type"] == "text"
+    assert "glucosa 95" in blocks[1]["text"]
+    assert "[Documento adjunto]" in blocks[1]["text"]
+
+
+def test_text_document_truncated():
+    import base64 as _b64
+    from synapse.services import content_blocks as cb
+    big = "x" * (cb.TEXT_DOC_MAX_CHARS + 500)
+    messages = [{
+        "role": "user",
+        "content": [{"type": "document", "source": {
+            "type": "base64", "media_type": "text/plain",
+            "data": _b64.b64encode(big.encode()).decode(),
+        }}],
+    }]
+    out = normalize_messages(messages, "openai")
+    text = out[0]["content"][0]["text"]
+    assert "documento truncado" in text
+    assert len(text) < cb.TEXT_DOC_MAX_CHARS + 200
+
+
+# ---------------------------------------------------------------------------
+# Audio blocks → transcript text
+# ---------------------------------------------------------------------------
+
+def test_input_audio_transcribed(monkeypatch):
+    from synapse.services import content_blocks as cb
+    monkeypatch.setattr(cb, "transcribe_audio_b64", lambda d, **kw: "hola desde el audio")
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "responde a la nota de voz"},
+            {"type": "input_audio", "input_audio": {"data": "ZmFrZQ==", "format": "mp3"}},
+        ],
+    }]
+    out = normalize_messages(messages, "openai")
+    blocks = out[0]["content"]
+    assert blocks[1]["type"] == "text"
+    assert "hola desde el audio" in blocks[1]["text"]
+
+
+def test_empty_audio_block_dropped():
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "hola"},
+            {"type": "input_audio", "input_audio": {}},
+        ],
+    }]
+    out = normalize_messages(messages, "openai")
+    assert len(out[0]["content"]) == 1
+
+
+def test_audio_whisper_error_propagates(monkeypatch):
+    """Whisper down must raise (surfaces 502), not silently drop the audio."""
+    import pytest
+    from synapse.services import content_blocks as cb
+
+    def _boom(d, **kw):
+        raise RuntimeError("whisper-server unavailable")
+    monkeypatch.setattr(cb, "transcribe_audio_b64", _boom)
+    messages = [{
+        "role": "user",
+        "content": [{"type": "input_audio", "input_audio": {"data": "ZmFrZQ==", "format": "wav"}}],
+    }]
+    with pytest.raises(RuntimeError):
+        normalize_messages(messages, "openai")

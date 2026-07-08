@@ -50,7 +50,13 @@ def _check_basic_auth(request: Request) -> bool:
 
 
 async def require_admin(request: Request):
-    """Dependency that enforces Basic Auth on admin endpoints."""
+    """Dependency que enforce Basic Auth en los endpoints admin.
+
+    NOTA (2026-07-02): se revirtió el atajo por `X-Forwarded-Email` — era
+    forjable en el tailnet (acceso directo a :8800 saltando el proxy :8811).
+    Cutover SSO correcto pendiente: validar un secreto compartido proxy→app
+    (patrón kanban) antes de volver a confiar en el header. Ver Propuestas-Fable.
+    """
     if not _check_basic_auth(request):
         raise HTTPException(
             status_code=401,
@@ -980,13 +986,28 @@ async def arena_upload_attachment(
             "metadata": {**metadata, "transcript_chars": len(transcript)},
         }
 
-    # Generic document: stored as base64 with a mime so the future handler
-    # (DOCX/TXT/MD/XLSX) can pick it up. For now non-Anthropic targets will
-    # drop it; Anthropic gets it as a document block.
+    # Generic document: stored as base64 with a mime so the content_blocks
+    # handler dispatches it (TXT/MD/CSV/JSON splice as text today; DOCX/XLSX
+    # pending). Browsers often send empty/octet-stream for .md/.csv — infer
+    # the media_type from the extension so the dispatch-by-mime works.
+    _EXT_MIME = {
+        ".txt": "text/plain",
+        ".md": "text/markdown",
+        ".markdown": "text/markdown",
+        ".csv": "text/csv",
+        ".json": "application/json",
+    }
+    name = (file.filename or "").lower()
+    media_type = mime or ""
+    if not media_type or media_type == "application/octet-stream":
+        for ext, mt in _EXT_MIME.items():
+            if name.endswith(ext):
+                media_type = mt
+                break
     return {
         "kind": "document",
         "base64": _b64.b64encode(data).decode("ascii"),
-        "media_type": mime or "application/octet-stream",
+        "media_type": media_type or "application/octet-stream",
         "metadata": metadata,
     }
 

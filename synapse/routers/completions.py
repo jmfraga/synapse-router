@@ -162,7 +162,19 @@ async def chat_completions(
         kwargs.pop("temperature", None)
 
     messages = [m.model_dump() for m in request.messages]
-    messages = normalize_messages(messages, detect_provider_kind(model))
+    # normalize_messages does blocking I/O (remote image fetch, whisper transcribe)
+    # — run off the event loop. Fast path: plain-string contents skip the hop.
+    if any(isinstance(m.get("content"), list) for m in messages):
+        try:
+            messages = await asyncio.to_thread(
+                normalize_messages, messages, detect_provider_kind(model)
+            )
+        except Exception as e:
+            request_id = uuid.uuid4().hex[:12]
+            logger.exception(
+                "normalize error request_id=%s model=%s: %s", request_id, model, e
+            )
+            raise HTTPException(502, {"error": "attachment_processing_failed", "request_id": request_id})
 
     # Pass api_key_id in metadata for the usage callback
     kwargs["metadata"] = {"api_key_id": api_key.id}

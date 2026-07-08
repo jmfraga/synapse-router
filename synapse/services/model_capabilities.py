@@ -44,6 +44,10 @@ VISION_PATTERNS: tuple[str, ...] = (
     "qwen3.6",  # mlx_vlm-served, accepts images
     "qwen2-vl",
     "qwen2.5-vl",
+    # Gemma 4 family is multimodal — vision works when served via mlx_vlm
+    # (E4B :8086 and 26B :8091 both run mlx_vlm as of 2026-07-08).
+    "gemma-4",
+    "medgemma",
 )
 
 # Native document support (PDF as document block, not as images).
@@ -55,6 +59,19 @@ DOCUMENT_PATTERNS: tuple[str, ...] = (
     "claude-sonnet-4",
     "claude-opus-4",
     "claude-opus-5",
+)
+
+
+# Models that accept audio natively (input_audio block forwarded upstream).
+# Everything else still takes audio through Synapse: the gateway transcribes
+# input_audio via whisper-server and splices the transcript as text.
+AUDIO_NATIVE_PATTERNS: tuple[str, ...] = (
+    "gemini-2.5",
+    "gemini-2.0-flash",
+    "gpt-4o-audio",
+    "gpt-audio",
+    "qwen2-audio",
+    "qwen2.5-omni",
 )
 
 
@@ -73,9 +90,22 @@ def supports_documents(model_id: str) -> bool:
     return _matches_any(model_id, DOCUMENT_PATTERNS)
 
 
+def audio_input_mode(model_id: str) -> str:
+    """How this model receives audio through Synapse.
+
+    "native"      — the model itself accepts audio (block could pass upstream).
+    "transcribed" — the gateway transcribes input_audio via whisper-server and
+                    the model receives text. Universal: applies to every chat model.
+    """
+    if _matches_any(model_id, AUDIO_NATIVE_PATTERNS):
+        return "native"
+    return "transcribed"
+
+
 def capability_metadata(model_id: str) -> dict:
     """Return the `metadata` dict to attach to a /v1/models entry."""
     return {
         "supports_vision": supports_vision(model_id),
         "supports_documents": supports_documents(model_id),
+        "audio_input": audio_input_mode(model_id),
     }

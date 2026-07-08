@@ -4,18 +4,23 @@ Translates a single OpenAI/Anthropic-shaped `messages` payload into the format
 the target provider expects, so a client can send one canonical shape and
 Synapse routes it anywhere.
 
-Today: image blocks (both directions) + PDF documents (Anthropic native vs
-PDF-to-images for everyone else). Audio is handled OUT of this layer — the
-Arena transcribes via /v1/audio/transcriptions before calling /v1/chat/completions.
+Today: image blocks (both directions), PDF documents (rasterized to images),
+plain-text documents (TXT/MD/CSV spliced as text), and audio (`input_audio`
+blocks transcribed server-side via the local whisper-server so ANY chat model
+can consume audio through the gateway).
 
-To add a new document type (DOCX, TXT, MD, XLSX, CSV) later: register a handler
-in DOCUMENT_HANDLERS keyed by mime_type. Each handler returns the list of
+To add a new document type (DOCX, XLSX) later: register a handler in
+DOCUMENT_HANDLERS keyed by mime_type. Each handler returns the list of
 content blocks to splice in.
+
+NOTE: this module performs blocking I/O (remote image fetch, whisper HTTP call).
+Callers in async context must run normalize_messages via asyncio.to_thread.
 """
 
 import base64
 import io
 import logging
+import os
 from typing import Callable, Literal
 
 import httpx
@@ -29,6 +34,15 @@ ProviderKind = Literal["anthropic", "openai", "google"]
 PDF_MAX_PAGES_DEFAULT = 20
 PDF_DPI_DEFAULT = 150
 PDF_JPEG_QUALITY = 80
+
+# Plain-text documents (TXT/MD/CSV) spliced inline — cap to keep one request
+# bounded in context/cost. ~200k chars ≈ 50k tokens.
+TEXT_DOC_MAX_CHARS = 200_000
+
+# Local whisper-server used to transcribe input_audio blocks at the gateway.
+# Same server audio.py uses for /v1/audio/transcriptions.
+WHISPER_SERVER_URL = os.environ.get("SYNAPSE_WHISPER_URL", "http://localhost:8178")
+AUDIO_TRANSCRIBE_TIMEOUT_S = 120.0
 
 
 def detect_provider_kind(model: str) -> ProviderKind:
@@ -119,15 +133,94 @@ def _handle_pdf(data_b64: str, target: ProviderKind, opts: dict) -> list[dict]:
     )
 
 
+def _handle_text_document(data_b64: str, target: ProviderKind, opts: dict) -> list[dict]:
+    """Decode a plain-text family document and splice it as a text block.
+
+    Works for ANY model — no vision requirement. Truncates at TEXT_DOC_MAX_CHARS.
+    """
+    try:
+        text = base64.b64decode(data_b64).decode("utf-8", errors="replace")
+    except Exception:
+        logger.warning("content_blocks: failed to decode text document — dropping block")
+        return []
+    max_chars = opts.get("text_doc_max_chars", TEXT_DOC_MAX_CHARS)
+    if len(text) > max_chars:
+        logger.warning(
+            "content_blocks: truncating text document from %d to %d chars",
+            len(text), max_chars,
+        )
+        text = text[:max_chars] + "\n[... documento truncado ...]"
+    return [{"type": "text", "text": f"[Documento adjunto]\n{text}"}]
+
+
 DOCUMENT_HANDLERS: dict[str, DocumentHandler] = {
     "application/pdf": _handle_pdf,
+    "text/plain": _handle_text_document,
+    "text/markdown": _handle_text_document,
+    "text/csv": _handle_text_document,
+    "application/json": _handle_text_document,
+    "text/x-markdown": _handle_text_document,
     # Future:
     #   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": _handle_docx,
-    #   "text/plain": _handle_text,
-    #   "text/markdown": _handle_text,
-    #   "text/csv": _handle_csv,
     #   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": _handle_xlsx,
 }
+
+
+# ---------------------------------------------------------------------------
+# Audio: input_audio blocks → transcript text (whisper-server local)
+# ---------------------------------------------------------------------------
+
+def transcribe_audio_b64(data_b64: str, *, audio_format: str = "wav", language: str = "es") -> str:
+    """Transcribe base64 audio via the local whisper-server. Returns the text.
+
+    Raises RuntimeError if the whisper-server is unavailable or errors, so the
+    caller surfaces a 502 instead of silently sending the prompt without audio.
+    """
+    raw = base64.b64decode(data_b64)
+    filename = f"audio.{audio_format or 'wav'}"
+    try:
+        with httpx.Client(timeout=AUDIO_TRANSCRIBE_TIMEOUT_S) as client:
+            resp = client.post(
+                f"{WHISPER_SERVER_URL}/inference",
+                files={"file": (filename, raw, f"audio/{audio_format or 'wav'}")},
+                data={"response_format": "json", "language": language},
+            )
+    except httpx.HTTPError as e:
+        raise RuntimeError(f"whisper-server unavailable: {e}") from e
+    if resp.status_code != 200:
+        raise RuntimeError(f"whisper-server error {resp.status_code}: {resp.text[:200]}")
+    try:
+        return (resp.json().get("text") or "").strip()
+    except Exception as e:
+        raise RuntimeError("whisper-server returned invalid JSON") from e
+
+
+def _handle_audio_block(block: dict) -> list[dict]:
+    """Normalize an audio block to a text block with its transcript.
+
+    Accepts OpenAI shape {type:"input_audio", input_audio:{data, format}} and a
+    defensive {type:"audio", source:{data, media_type}} variant. Transcribing at
+    the gateway makes audio universal: any chat model behind Synapse can take
+    voice notes without native audio support.
+    """
+    data_b64 = ""
+    audio_format = "wav"
+    if block.get("type") == "input_audio":
+        ia = block.get("input_audio") or {}
+        data_b64 = ia.get("data", "")
+        audio_format = ia.get("format", "wav")
+    elif block.get("type") == "audio":
+        src = block.get("source") or {}
+        data_b64 = src.get("data", "")
+        media_type = src.get("media_type", "audio/wav")
+        audio_format = media_type.split("/")[-1]
+    if not data_b64:
+        logger.warning("content_blocks: empty audio block — dropping")
+        return []
+    transcript = transcribe_audio_b64(data_b64, audio_format=audio_format)
+    if not transcript:
+        return [{"type": "text", "text": "[Audio adjunto sin contenido transcribible]"}]
+    return [{"type": "text", "text": f"[Transcripción del audio adjunto]\n{transcript}"}]
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +298,10 @@ def _normalize_block(
     # Images: always canonicalize to OpenAI image_url regardless of target.
     if btype in ("image", "image_url"):
         return [_to_openai_image(block)]
+
+    # Audio: transcribe at the gateway → text block (universal across models).
+    if btype in ("input_audio", "audio"):
+        return _handle_audio_block(block)
 
     # Document blocks: dispatch by mime_type
     if btype == "document":
