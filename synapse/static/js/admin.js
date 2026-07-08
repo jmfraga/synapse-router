@@ -336,6 +336,7 @@ async function loadKeysTable() {
             <td>${k.service}</td>
             <td><code>${k.key_prefix}...</code></td>
             <td>${k.allowed_models}</td>
+            <td><span class="badge ${k.audio_policy === 'native' ? 'active' : ''}" title="${k.audio_policy === 'native' ? 'El modelo oye el audio (prosodia)' : 'Whisper local transcribe'}">${k.audio_policy === 'native' ? 'Native' : 'Whisper'}</span></td>
             <td>${k.rate_limit_rpm}</td>
             <td><span class="badge ${k.is_active ? 'active' : 'inactive'}">${k.is_active ? 'Activa' : 'Revocada'}</span></td>
             <td>${actions}</td>
@@ -345,7 +346,7 @@ async function loadKeysTable() {
     container.innerHTML = `<table>
         <thead><tr>
             <th>Nombre</th><th>Servicio</th><th>Prefijo</th>
-            <th>Modelos</th><th>RPM</th>
+            <th>Modelos</th><th>Audio</th><th>RPM</th>
             <th>Estado</th><th>Acciones</th>
         </tr></thead>
         <tbody>${rows}</tbody>
@@ -370,7 +371,8 @@ async function createKey() {
         return;
     }
 
-    const body = { name, service, allowed_models: models };
+    const audioPolicy = document.getElementById('key-audio-policy')?.value || 'transcribe';
+    const body = { name, service, allowed_models: models, audio_policy: audioPolicy };
 
     const result = await api('/admin/api/keys', 'POST', body);
 
@@ -386,6 +388,7 @@ async function editKey(id) {
     document.getElementById('edit-key-id').value = id;
     document.getElementById('edit-key-name').value = key.name;
     document.getElementById('edit-key-service').value = key.service;
+    document.getElementById('edit-key-audio-policy').value = key.audio_policy || 'transcribe';
 
     document.getElementById('edit-key-modal').style.display = 'block';
 }
@@ -400,8 +403,10 @@ async function saveKeyEdit() {
         return;
     }
 
+    const audioPolicy = document.getElementById('edit-key-audio-policy').value;
+
     await api(`/admin/api/keys/${id}`, 'PUT', {
-        name, service
+        name, service, audio_policy: audioPolicy
     });
 
     document.getElementById('edit-key-modal').style.display = 'none';
