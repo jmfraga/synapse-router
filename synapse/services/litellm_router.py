@@ -100,7 +100,7 @@ async def build_router(db: AsyncSession) -> Router:
                 # (2026-05-04) en los MLX de la M4; extendido al GX10 (vLLM), que
                 # también hace swaps/reboots durante el PoC. Cloud providers NO lo
                 # reciben (fail-fast + failover). Detección por is_local del provider
-                # (el GX10 vive en gx10-1cce, no en localhost).
+                # (el nodo DGX vive en un host remoto del tailnet, no en localhost).
                 deployment = {
                     "model_name": model_id,
                     "litellm_params": {
