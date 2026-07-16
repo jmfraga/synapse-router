@@ -81,8 +81,10 @@ async def build_router(db: AsyncSession) -> Router:
         api_key = _get_key(provider)
         config = json.loads(provider.config_json) if provider.config_json else {}
 
-        if name.startswith("mlx"):
-            # MLX: each model may have its own base URL
+        if name.startswith("mlx") or config.get("openai_compat"):
+            # Local OpenAI-compatible engines: MLX servers (M4) and vLLM/SGLang
+            # nodes (GX10 DGX). Each model may have its own base URL. Flagged
+            # either by "mlx" name prefix (legacy) or config {"openai_compat": true}.
             model_urls = config.get("model_base_urls", {})
             enabled = config.get("enabled_models", [])
             custom = config.get("custom_models", [])
@@ -92,27 +94,26 @@ async def build_router(db: AsyncSession) -> Router:
                 model_base = model_urls.get(model_id, base_url).rstrip("/")
                 if not model_base.endswith("/v1"):
                     model_base = f"{model_base}/v1"
-                # Sticky fallback: cualquier deployment MLX local (host 127.0.0.1
-                # o localhost en cualquier puerto :80xx) recibe allowed_fails=3 /
-                # cooldown_time=600. Origen: zombie-loop de Qwen3.6 (2026-05-04, 8
-                # caídas en 80 min) por bugs upstream mlx-lm 0.31.2 en arquitecturas
-                # híbridas + retry storm desde RPi5. Generalizado para cubrir Gemma-E4B
-                # (8086), Qwen3.6 (8088) y Gemma-26B/31B (8091). Audio (:8090) no pasa
-                # por el router. Detección por host evita falsos positivos contra
-                # cloud providers.
+                # Sticky fallback (allowed_fails=3 / cooldown_time=600) para todo
+                # motor propio (is_local): sobrevive reinicios, swaps de modelo y
+                # cold starts sin retry-storm. Origen: zombie-loop de Qwen3.6
+                # (2026-05-04) en los MLX de la M4; extendido al GX10 (vLLM), que
+                # también hace swaps/reboots durante el PoC. Cloud providers NO lo
+                # reciben (fail-fast + failover). Detección por is_local del provider
+                # (el GX10 vive en gx10-1cce, no en localhost).
                 deployment = {
                     "model_name": model_id,
                     "litellm_params": {
                         "model": f"openai/{model_id}",
                         "api_base": model_base,
-                        "api_key": "not-needed",
+                        "api_key": api_key or "not-needed",
                     },
                 }
-                if ("//localhost:" in model_base) or ("//127.0.0.1:" in model_base):
+                if provider.is_local or "//localhost:" in model_base or "//127.0.0.1:" in model_base:
                     deployment["litellm_params"]["allowed_fails"] = 3
                     deployment["litellm_params"]["cooldown_time"] = 600
                 model_list.append(deployment)
-                logger.info("Added MLX model: %s -> %s", model_id, model_base)
+                logger.info("Added local OpenAI-compat model: %s -> %s", model_id, model_base)
 
         elif name == "minimax":
             # MiniMax: OpenAI-compatible endpoint
