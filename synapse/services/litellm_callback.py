@@ -40,8 +40,11 @@ class SynapseUsageCallback(CustomLogger):
             except Exception as e:
                 logger.debug("completion_cost failed model=%s: %s", model, e)
 
-            # API key ID from metadata (set by completions_v2 handler)
-            metadata = kwargs.get("metadata", {}) or {}
+            # API key ID from metadata (set by completions handler). litellm
+            # Router mueve la metadata del caller a litellm_params.metadata —
+            # leerla solo a nivel raíz siempre daba {} → api_key_id=0 y el
+            # analytics "por servicio" nunca atribuía (bug hasta 2026-07-16).
+            metadata = litellm_params.get("metadata") or kwargs.get("metadata") or {}
             api_key_id = metadata.get("api_key_id", 0)
 
             log = UsageLog(
@@ -76,7 +79,7 @@ class SynapseUsageCallback(CustomLogger):
             if not provider and "/" in model:
                 provider = model.split("/")[0]
 
-            metadata = kwargs.get("metadata", {}) or {}
+            metadata = litellm_params.get("metadata") or kwargs.get("metadata") or {}
             api_key_id = metadata.get("api_key_id", 0)
 
             log = UsageLog(
