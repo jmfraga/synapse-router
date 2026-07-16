@@ -163,6 +163,19 @@ async def chat_completions(
     if model.startswith(("anthropic/claude-opus-4-7", "anthropic/claude-opus-4-8", "anthropic/claude-opus-5")):
         kwargs.pop("temperature", None)
 
+    # chat_template_kwargs (e.g. {"enable_thinking": true} para razonamiento
+    # opt-in del Qwen del GX10) solo aplica a motores locales OpenAI-compat;
+    # viaja en extra_body, que es como litellm lo inyecta al body del request.
+    # Los providers cloud no lo reciben (romperían con un param desconocido).
+    # NOTA: con thinking ON el razonamiento llega inline en content (vLLM 0.25
+    # borra el token </think> al detokenizar e ignora skip_special_tokens en el
+    # chat API, así que no hay marcador textual para separarlo; la respuesta
+    # final viene completa al final del texto — paridad con los MLX de la M4).
+    _LOCAL_ENGINE_PREFIXES = ("gx10:", "mlx:", "mlx-heavy:")
+    ctk = request.model_dump().get("chat_template_kwargs")
+    if ctk and request.model.startswith(_LOCAL_ENGINE_PREFIXES):
+        kwargs["extra_body"] = {"chat_template_kwargs": ctk}
+
     messages = [m.model_dump() for m in request.messages]
     # Resolve where audio gets handled: per-request `audio_input` override >
     # per-key audio_policy > default transcribe. "native" only holds if the

@@ -55,16 +55,44 @@ def sanitize_tts_markup(content: str) -> str:
     return content
 
 
+def split_think_block(content: str) -> tuple[str, str]:
+    """Split hybrid-reasoning output "thinking...</think>answer" → (reasoning, answer).
+
+    Qwen3-family templates open <think> in the prompt scaffold, so the output
+    contains the thinking followed by </think> and the final answer. Engines
+    without a reasoning parser (GX10 vLLM opt-in thinking, MLX servers on M4)
+    deliver that mixed in content. Returns ("", content) when no block found.
+    """
+    if "</think>" not in content:
+        return "", content
+    thinking, _, answer = content.rpartition("</think>")
+    thinking = thinking.replace("<think>", "").strip()
+    return thinking, answer.strip()
+
+
 def sanitize_response_data(data: dict) -> dict:
     """Apply all sanitizations to a completion response dict (non-streaming)."""
     for choice in data.get("choices", []):
         msg = choice.get("message") or choice.get("delta") or {}
-        reasoning = msg.pop("reasoning_content", None)
+        # Reasoning field name varies by engine: litellm/Nemotron use
+        # "reasoning_content"; vLLM ≥0.25 (GX10) emits "reasoning".
+        reasoning = msg.pop("reasoning_content", None) or msg.pop("reasoning", None)
         msg.pop("thinking_blocks", None)
-        # Reasoning models (Nemotron, etc.) can exhaust max_tokens in thinking and
-        # leave content empty. Fall back to reasoning so the client sees something.
+        # Inline think block (engine without reasoning parser): split it out
+        # so clients always get a clean final answer in content.
+        if isinstance(msg.get("content"), str) and "</think>" in msg["content"]:
+            thinking, answer = split_think_block(msg["content"])
+            if answer:
+                msg["content"] = answer
+                reasoning = reasoning or thinking
+        # Reasoning models can exhaust max_tokens thinking and leave content
+        # empty (finish=length before </think>). Fall back to the reasoning,
+        # flagged, so the client sees the partial work instead of nothing.
         if not msg.get("content") and isinstance(reasoning, str) and reasoning.strip():
-            msg["content"] = reasoning.strip()
+            msg["content"] = (
+                "[razonamiento truncado — sube max_tokens o desactiva thinking]\n"
+                + reasoning.strip()
+            )
         if isinstance(msg.get("content"), str):
             msg["content"] = sanitize_tts_markup(msg["content"])
     return data
@@ -75,6 +103,7 @@ def sanitize_stream_chunk(chunk_data: dict) -> dict:
     for choice in chunk_data.get("choices", []):
         delta = choice.get("delta") or {}
         delta.pop("reasoning_content", None)
+        delta.pop("reasoning", None)
         delta.pop("thinking_blocks", None)
         if isinstance(delta.get("content"), str):
             delta["content"] = _TTS_BRACKET_RE.sub("", delta["content"])
